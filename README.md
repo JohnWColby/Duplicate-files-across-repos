@@ -26,9 +26,10 @@ GIT_AUTH_METHOD="ssh"
 GIT_AUTH_METHOD="none"
 ```
 
-### 2. Set Branch and Base URL (config.sh)
+### 2. Set Branches and Base URL (config.sh)
 ```bash
-BRANCH_NAME="update-strings"              # Branch to create/use
+BASE_BRANCH=""                            # Branch to checkout before changes (empty = use current)
+BRANCH_NAME="update-strings"              # New branch to create for changes
 GIT_BASE_URL="https://github.com/your-org"  # For short repo names
 ```
 
@@ -94,13 +95,16 @@ For each repository in `repos.txt`:
 
 1. **Authenticate** using configured method (token/SSH/none)
 2. **Clone** the repository (skip if already exists)
-3. **Create/checkout branch** (if `BRANCH_NAME` is set)
-4. **Search** for all files containing each "old" string in their filename
-5. **Copy** each matching file to the same location
-6. **Rename** the copy by replacing "old" with "new" string
-7. **Skip** if the renamed file already exists or would be identical
-8. **Commit and push** (if `-p` flag used)
-9. **Log** all operations to log file
+3. **Checkout base branch** (if `BASE_BRANCH` is set)
+4. **Fetch and pull** base branch (only if no local commits ahead of remote)
+5. **Create/checkout working branch** (if `BRANCH_NAME` is set)
+6. **Fetch and pull** working branch (only if existing branch with no local commits ahead)
+7. **Search** for all files containing each "old" string in their filename
+8. **Copy** each matching file to the same location
+9. **Rename** the copy by replacing "old" with "new" string
+10. **Skip** if the renamed file already exists or would be identical
+11. **Commit and push** (if `-p` flag used)
+12. **Log** all operations to log file
 
 ### Example
 
@@ -109,6 +113,7 @@ For each repository in `repos.txt`:
 GIT_AUTH_METHOD="token"
 GIT_USERNAME="myusername"
 GIT_AUTH_TOKEN="ghp_abc123..."
+BASE_BRANCH="main"
 BRANCH_NAME="add-prod-configs"
 
 declare -a REPLACEMENTS=(
@@ -152,6 +157,38 @@ backend/ (on branch: add-prod-configs)
 Commits created and pushed to: add-prod-configs
 ```
 
+### Smart Branch Handling
+
+The script intelligently handles branch checkout and updates:
+
+**Base Branch Checkout:**
+- If already on BASE_BRANCH, stays there
+- If BASE_BRANCH exists locally, checks it out
+- If BASE_BRANCH only exists remotely, fetches and checks it out
+- If BASE_BRANCH doesn't exist, warns and continues on current branch
+
+**Automatic Pull Behavior:**
+- After checking out a branch, the script automatically fetches from remote
+- If the local branch has **no commits ahead** of remote, it pulls the latest changes
+- If the local branch has commits ahead, it **skips the pull** to preserve local work
+- This ensures you're working with the latest code while protecting uncommitted work
+
+Example output when pulling is safe:
+```
+ℹ Checking out base branch: main
+✓ Checked out base branch: main
+ℹ Pulling latest changes from origin/main...
+✓ Successfully pulled latest changes
+```
+
+Example output when local commits exist:
+```
+ℹ Checking out existing branch: my-feature
+ℹ Local branch has 2 commit(s) ahead of remote - skipping pull
+```
+
+This gives you full control over which branch to start from before creating your working branch!
+
 ## Configuration Reference
 
 ### Complete config.sh Template
@@ -168,7 +205,12 @@ GIT_AUTH_METHOD="token"
 GIT_USERNAME="your-username"
 GIT_AUTH_TOKEN="${GIT_AUTH_TOKEN:-}"  # Or: export GIT_AUTH_TOKEN="..."
 
-# Branch to create/use
+# Branch to checkout before making changes
+# If empty, uses the current/default branch after cloning  
+BASE_BRANCH=""
+
+# Branch to create for changes
+# If empty, makes changes on BASE_BRANCH (or default)
 BRANCH_NAME="update-strings"
 AUTO_CREATE_BRANCH=true
 
@@ -248,14 +290,50 @@ If `GIT_BASE_URL="https://github.com/myorg"`, then `repo1` becomes `https://gith
 #### Branch Configuration
 
 ```bash
-# Create/use a specific branch
+# Checkout a specific branch before making changes
+BASE_BRANCH="main"  # or "develop", "staging", etc.
+
+# Create a new branch for the changes
 BRANCH_NAME="update-file-copies"
 
-# Work on default branch
+# If BASE_BRANCH is empty, uses current/default branch
+BASE_BRANCH=""
+
+# If BRANCH_NAME is empty, makes changes on BASE_BRANCH (or current)
 BRANCH_NAME=""
 
 # Auto-create branch if it doesn't exist
 AUTO_CREATE_BRANCH=true
+```
+
+**Use Cases:**
+
+1. **Work on main branch:**
+```bash
+BASE_BRANCH="main"
+BRANCH_NAME="update-configs"
+# Result: Checkouts main → Creates update-configs from main → Makes changes
+```
+
+2. **Work on develop branch:**
+```bash
+BASE_BRANCH="develop"
+BRANCH_NAME="feature/new-configs"
+# Result: Checkouts develop → Creates feature/new-configs from develop → Makes changes
+```
+
+3. **Use current branch:**
+```bash
+BASE_BRANCH=""
+BRANCH_NAME="my-changes"
+# Result: Stays on current branch → Creates my-changes → Makes changes
+```
+
+4. **Make changes directly on base branch:**
+```bash
+BASE_BRANCH="staging"
+BRANCH_NAME=""
+# Result: Checkouts staging → Makes changes directly on staging
 ```
 
 #### Case Sensitivity
