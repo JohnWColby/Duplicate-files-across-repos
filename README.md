@@ -2,10 +2,81 @@
 
 A pure bash script that clones git repositories and creates renamed copies of files based on string substitution patterns. Features robust authentication support, branching, logging, and flexible configuration.
 
+## Quick Start (2 Minutes)
+
+### 1. Configure Authentication (config.sh)
+
+Choose your authentication method:
+
+**Option A: Token (HTTPS) - Recommended**
+```bash
+GIT_AUTH_METHOD="token"
+GIT_USERNAME="your-username"
+GIT_AUTH_TOKEN="ghp_your_github_token"  # Get from GitHub Settings → Developer settings
+```
+
+**Option B: SSH**
+```bash
+GIT_AUTH_METHOD="ssh"
+# Ensure: ssh-add ~/.ssh/id_rsa
+```
+
+**Option C: None (public repos)**
+```bash
+GIT_AUTH_METHOD="none"
+```
+
+### 2. Set Branch and Base URL (config.sh)
+```bash
+BRANCH_NAME="update-strings"              # Branch to create/use
+GIT_BASE_URL="https://github.com/your-org"  # For short repo names
+```
+
+### 3. Define Replacements (config.sh)
+```bash
+declare -a REPLACEMENTS=(
+    "dev|prod"              # config.dev.yaml → config.prod.yaml
+    "test|final"            # api.test.js → api.final.js
+    "v1|v2"                 # schema-v1.sql → schema-v2.sql
+)
+
+CASE_SENSITIVE=true  # or false for case-insensitive
+```
+
+### 4. Add Repositories (repos.txt)
+
+**Option A: Full URLs**
+```txt
+https://github.com/username/repo1.git
+git@github.com:username/repo2.git
+```
+
+**Option B: Repo names** (uses GIT_BASE_URL)
+```txt
+repo1
+repo2
+repo3
+```
+
+### 5. Run
+
+```bash
+# Test first (dry run)
+./git_file_rename.sh -d
+
+# Copy files locally (no push)
+./git_file_rename.sh
+
+# Copy and push to git
+./git_file_rename.sh -p
+
+# Custom commit message
+./git_file_rename.sh -p -m "Add production configs"
+```
+
 ## Features
 
-- 🔄 **Automatic Repository Cloning**: Clones repositories if they don't exist locally (silently continues if already cloned)
-- 🔐 **Multiple Authentication Methods**: Supports token-based (HTTPS), SSH, or no authentication
+- 🔐 **Multiple Authentication Methods**: Token-based (HTTPS), SSH, or no authentication
 - 🌿 **Branch Management**: Create and work on specific branches
 - 🔍 **Pattern-Based File Search**: Finds files containing specific strings in their filenames
 - 📝 **Smart File Copying**: Creates renamed copies in the same location as originals
@@ -17,141 +88,177 @@ A pure bash script that clones git repositories and creates renamed copies of fi
 - 📋 **Comprehensive Logging**: Track all operations in a log file
 - 💯 **Pure Bash**: No Python dependencies required
 
-## Quick Start
+## How It Works
 
-1. **Edit `config.sh`** with your settings:
+For each repository in `repos.txt`:
+
+1. **Authenticate** using configured method (token/SSH/none)
+2. **Clone** the repository (skip if already exists)
+3. **Create/checkout branch** (if `BRANCH_NAME` is set)
+4. **Search** for all files containing each "old" string in their filename
+5. **Copy** each matching file to the same location
+6. **Rename** the copy by replacing "old" with "new" string
+7. **Skip** if the renamed file already exists or would be identical
+8. **Commit and push** (if `-p` flag used)
+9. **Log** all operations to log file
+
+### Example
+
+**config.sh:**
 ```bash
-# Authentication
-GIT_AUTH_METHOD="token"  # or "ssh" or "none"
-GIT_USERNAME="your-username"
-GIT_AUTH_TOKEN="your_token_here"
+GIT_AUTH_METHOD="token"
+GIT_USERNAME="myusername"
+GIT_AUTH_TOKEN="ghp_abc123..."
+BRANCH_NAME="add-prod-configs"
 
-# Branch to create/use
-BRANCH_NAME="update-file-copies"
-
-# Rename mappings
-RENAME_PAIRS=(
+declare -a REPLACEMENTS=(
     "dev|prod"
     "test|final"
 )
+
+CASE_SENSITIVE=true
 ```
 
-2. **Edit `repos.txt`** with your repositories:
+**repos.txt:**
 ```txt
-https://github.com/username/repo1.git
-repo2
-repo3
+git@github.com:company/backend.git
 ```
 
-3. **Run**:
+**Files in repository:**
+```
+backend/
+├── config.dev.yaml
+├── database.dev.json
+├── api.test.js
+└── utils.js
+```
+
+**Command:**
 ```bash
-./git_file_rename.sh -d  # Dry run
-./git_file_rename.sh     # Execute
-./git_file_rename.sh -p  # Execute and push
+./git_file_rename.sh -p
 ```
 
-## Configuration Guide
+**Result:**
+```
+backend/ (on branch: add-prod-configs)
+├── config.dev.yaml
+├── config.prod.yaml        ← NEW (copy of config.dev.yaml)
+├── database.dev.json
+├── database.prod.json      ← NEW (copy of database.dev.json)
+├── api.test.js
+├── api.final.js            ← NEW (copy of api.test.js)
+└── utils.js
 
-### Authentication Methods
+Commits created and pushed to: add-prod-configs
+```
 
-#### Token-Based Authentication (HTTPS)
+## Configuration Reference
 
-Best for: GitHub, GitLab, Bitbucket with personal access tokens
+### Complete config.sh Template
 
+```bash
+# Repository list file
+REPO_LIST_FILE="repos.txt"
+
+# Git remote base URL (for short repo names)
+GIT_BASE_URL="https://github.com/your-org"
+
+# Authentication method: "token", "ssh", or "none"
+GIT_AUTH_METHOD="token"
+GIT_USERNAME="your-username"
+GIT_AUTH_TOKEN="${GIT_AUTH_TOKEN:-}"  # Or: export GIT_AUTH_TOKEN="..."
+
+# Branch to create/use
+BRANCH_NAME="update-strings"
+AUTO_CREATE_BRANCH=true
+
+# Find/Replace mappings (add as many as needed)
+declare -a REPLACEMENTS=(
+    "oldString1|newString1"
+    "oldString2|newString2"
+    "TODO: update this|DONE: updated"
+)
+
+# Case sensitivity for find/replace operations (true/false)
+CASE_SENSITIVE=true
+
+# Working directory for cloning repos (will be created if it doesn't exist)
+WORK_DIR="./repos_temp"
+
+# Commit message (supports multi-line)
+COMMIT_MESSAGE="Update string replacements across repository"
+
+# Log file for tracking completed repos and PR URLs
+LOG_FILE="./batch_update_log.txt"
+
+# Git author info (optional - uses global config if not set)
+export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-Your Name}"
+export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-your.email@example.com}"
+```
+
+### Configuration Options Explained
+
+#### Authentication (GIT_AUTH_METHOD)
+
+**Token-Based (HTTPS)** - Best for GitHub/GitLab with personal access tokens
 ```bash
 GIT_AUTH_METHOD="token"
 GIT_USERNAME="your-username"
-GIT_AUTH_TOKEN="ghp_your_github_token"  # or set via: export GIT_AUTH_TOKEN="..."
+GIT_AUTH_TOKEN="ghp_xxxxx"  # GitHub Personal Access Token
 ```
 
-**GitHub Personal Access Token:**
-1. Go to GitHub Settings → Developer settings → Personal access tokens
+To get a GitHub token:
+1. GitHub Settings → Developer settings → Personal access tokens
 2. Generate new token with `repo` permissions
-3. Copy token to `GIT_AUTH_TOKEN`
+3. Copy token to config.sh
 
-#### SSH Authentication
-
-Best for: Users with SSH keys configured
-
+**SSH** - Best for users with SSH keys configured
 ```bash
 GIT_AUTH_METHOD="ssh"
 ```
 
 Requirements:
-- SSH keys generated (`ssh-keygen`)
+- SSH keys generated: `ssh-keygen`
 - Public key added to GitHub/GitLab
-- SSH agent running with key loaded (`ssh-add ~/.ssh/id_rsa`)
+- SSH agent running: `ssh-add ~/.ssh/id_rsa`
+- Test: `ssh -T git@github.com`
 
-Test with: `ssh -T git@github.com`
-
-#### No Authentication
-
-Best for: Public repositories or pre-configured credentials
-
+**None** - For public repos or pre-configured credentials
 ```bash
 GIT_AUTH_METHOD="none"
 ```
 
-Uses system's default git configuration.
+#### Repository Format (repos.txt)
 
-### Repository List (repos.txt)
-
-Supports two formats:
-
-**1. Full URLs:**
+**Full URLs:**
 ```txt
 https://github.com/username/repo1.git
 git@github.com:username/repo2.git
 ```
 
-**2. Repository names only:**
+**Short names** (combined with GIT_BASE_URL):
 ```txt
 repo1
 repo2
 repo3
 ```
 
-When using names only, they're combined with `GIT_BASE_URL`:
-```bash
-GIT_BASE_URL="https://github.com/your-org"
-# repo1 becomes: https://github.com/your-org/repo1.git
-```
+If `GIT_BASE_URL="https://github.com/myorg"`, then `repo1` becomes `https://github.com/myorg/repo1.git`
 
-### Rename Mappings
-
-Define in `config.sh`:
-
-```bash
-RENAME_PAIRS=(
-    "dev|prod"              # config.dev.yaml → config.prod.yaml
-    "staging|production"    # api.staging.js → api.production.js
-    "test|final"            # data.test.json → data.final.json
-    "v1|v2"                 # schema-v1.sql → schema-v2.sql
-)
-```
-
-Alternative name (same functionality):
-```bash
-REPLACEMENTS=(
-    "dev|prod"
-    "test|final"
-)
-```
-
-### Branch Configuration
+#### Branch Configuration
 
 ```bash
 # Create/use a specific branch
 BRANCH_NAME="update-file-copies"
 
-# Work on default branch (leave empty)
+# Work on default branch
 BRANCH_NAME=""
 
 # Auto-create branch if it doesn't exist
 AUTO_CREATE_BRANCH=true
 ```
 
-### Case Sensitivity
+#### Case Sensitivity
 
 ```bash
 # Case-sensitive matching (default)
@@ -163,43 +270,19 @@ CASE_SENSITIVE=false
 # "Dev" = "dev" = "DEV"
 ```
 
-### Working Directory
+#### Commit Messages
 
 ```bash
-# Where repositories are cloned
-WORK_DIR="./repos_temp"
+# Single-line message
+COMMIT_MESSAGE="Add production config files"
 
-# Will be created if it doesn't exist
-# Use absolute path for consistency
-```
-
-### Logging
-
-```bash
-# Log file location
-LOG_FILE="./batch_update_log.txt"
-
-# Enable detailed logging
-VERBOSE_LOGGING=true
-
-# Log contains:
-# - Timestamp of operations
-# - Repository status (cloned, exists, failed)
-# - Files copied
-# - Push results
-```
-
-### Commit Message
-
-```bash
-# Multi-line commit message
-COMMIT_MESSAGE="Add renamed file copies
+# Multi-line message
+COMMIT_MESSAGE="Add production config files
 
 This commit creates production copies of development files
-by renaming files based on configured string replacements."
+by renaming files based on configured string replacements.
 
-# Or simple message
-COMMIT_MESSAGE="Add production config files"
+Refs: #123"
 ```
 
 ## Usage
@@ -246,175 +329,15 @@ Options:
 
 **6. Using environment variables:**
 ```bash
-# Set token via environment
 export GIT_AUTH_TOKEN="ghp_your_token"
 ./git_file_rename.sh -p
-```
-
-## How It Works
-
-For each repository in `repos.txt`:
-
-1. **Authenticate** using configured method (token/SSH/none)
-2. **Clone** the repository (skip if already exists)
-3. **Create/checkout branch** (if `BRANCH_NAME` is set)
-4. **Search** for all files containing each "old" string in their filename
-5. **Copy** each matching file to the same location
-6. **Rename** the copy by replacing "old" with "new" string
-7. **Skip** if the renamed file already exists or would be identical
-8. **Commit and push** (if `-p` flag used)
-9. **Log** all operations to log file
-
-### Example
-
-**config.sh:**
-```bash
-GIT_AUTH_METHOD="token"
-GIT_USERNAME="myusername"
-GIT_AUTH_TOKEN="ghp_abc123..."
-BRANCH_NAME="add-prod-configs"
-
-RENAME_PAIRS=(
-    "dev|prod"
-    "test|final"
-)
-
-CASE_SENSITIVE=true
-```
-
-**repos.txt:**
-```txt
-git@github.com:company/backend.git
-```
-
-**Files in repository:**
-```
-backend/
-├── config.dev.yaml
-├── database.dev.json
-├── api.test.js
-└── utils.js
-```
-
-**Command:**
-```bash
-./git_file_rename.sh -p
-```
-
-**Result:**
-```
-backend/ (on branch: add-prod-configs)
-├── config.dev.yaml
-├── config.prod.yaml        ← NEW (copy of config.dev.yaml)
-├── database.dev.json
-├── database.prod.json      ← NEW (copy of database.dev.json)
-├── api.test.js
-├── api.final.js            ← NEW (copy of api.test.js)
-└── utils.js
-
-Commits created and pushed to: add-prod-configs
-```
-
-## Detailed Example
-
-**Setup (config.sh):**
-```bash
-GIT_AUTH_METHOD="token"
-GIT_USERNAME="mycompany"
-GIT_AUTH_TOKEN="ghp_xxxxxxxxxxxxx"
-GIT_BASE_URL="https://github.com/mycompany"
-BRANCH_NAME="prod-configs"
-WORK_DIR="./repos_temp"
-LOG_FILE="./operations.log"
-
-RENAME_PAIRS=(
-    "dev|prod"
-    "staging|production"
-)
-
-CASE_SENSITIVE=true
-COMMIT_MESSAGE="Add production configuration files"
-```
-
-**repos.txt:**
-```txt
-api-service
-web-app
-mobile-backend
-```
-
-**Run:**
-```bash
-./git_file_rename.sh -d  # Preview
-./git_file_rename.sh -p  # Execute and push
-```
-
-**Output:**
-```
-======================================================================
-Git File Rename - Starting
-======================================================================
-Config file: ./config.sh
-Repository list: repos.txt
-Working directory: ./repos_temp
-Log file: ./operations.log
-
-✓ Git authentication configured for token-based access
-✓ Configuration validated
-
-ℹ Repositories to process: 3
-ℹ Rename mappings: 2
-ℹ Case sensitive: true
-ℹ Branch: prod-configs
-ℹ Authentication: token
-
-Rename map:
-  'dev' → 'prod'
-  'staging' → 'production'
-
-======================================================================
-Processing repository: api-service
-======================================================================
-ℹ Cloning repository: api-service
-✓ Successfully cloned to: ./repos_temp/api-service
-ℹ Creating new branch: prod-configs
-
-ℹ Searching for files containing 'dev' in filename...
-  Found 3 file(s)
-  Processing: config/database.dev.yaml
-✓ Created: database.prod.yaml
-  Processing: config/redis.dev.yaml
-✓ Created: redis.prod.yaml
-  Processing: config/cache.dev.json
-✓ Created: cache.prod.json
-
-Files copied in api-service: 3
-
-======================================================================
-Git Push Operations
-======================================================================
-
-ℹ Git operations in: api-service
-  Adding changes...
-  Committing changes...
-  Pushing to branch: prod-configs
-✓ Successfully pushed changes
-
-======================================================================
-Summary
-======================================================================
-Total files copied: 8
-Successful repositories: 3/3
-Log file: ./operations.log
-
-✓ Operation completed successfully!
 ```
 
 ## Use Cases
 
 ### 1. Environment Configuration Files
 ```bash
-RENAME_PAIRS=(
+declare -a REPLACEMENTS=(
     "dev|prod"
     "development|production"
     "staging|prod"
@@ -424,7 +347,7 @@ Creates production versions of dev configs.
 
 ### 2. Version Migration
 ```bash
-RENAME_PAIRS=(
+declare -a REPLACEMENTS=(
     "v1|v2"
     "1.0|2.0"
     "old|new"
@@ -434,7 +357,7 @@ Creates next version copies of versioned files.
 
 ### 3. Testing to Production
 ```bash
-RENAME_PAIRS=(
+declare -a REPLACEMENTS=(
     "test|prod"
     "mock|real"
     "sample|live"
@@ -444,11 +367,59 @@ Duplicates test files for production use.
 
 ### 4. Multi-Environment Deployment
 ```bash
-RENAME_PAIRS=(
+declare -a REPLACEMENTS=(
     "local|cloud"
     "onprem|aws"
     "internal|external"
 )
+```
+
+## Output Example
+
+```
+======================================================================
+Git File Rename - Starting
+======================================================================
+✓ Git authentication configured for token-based access
+✓ Configuration validated
+
+ℹ Repositories to process: 2
+ℹ Replacements: 2
+ℹ Case sensitive: true
+ℹ Branch: add-prod-configs
+ℹ Authentication: token
+
+Replacement mappings:
+  'dev' → 'prod'
+  'test' → 'final'
+
+======================================================================
+Processing repository: backend
+======================================================================
+✓ Successfully cloned
+ℹ Creating new branch: add-prod-configs
+
+ℹ Searching for files containing 'dev' in filename...
+  Found 2 file(s)
+  Processing: config.dev.yaml
+✓ Created: config.prod.yaml
+  Processing: database.dev.json
+✓ Created: database.prod.json
+
+Files copied in backend: 2
+
+======================================================================
+Git Push Operations
+======================================================================
+✓ Successfully pushed changes
+
+======================================================================
+Summary
+======================================================================
+Total files copied: 2
+Successful repositories: 1/1
+Log file: ./batch_update_log.txt
+✓ Operation completed successfully!
 ```
 
 ## Troubleshooting
@@ -460,7 +431,7 @@ RENAME_PAIRS=(
 # Verify token is set
 echo $GIT_AUTH_TOKEN
 
-# Or set it explicitly
+# Set explicitly
 export GIT_AUTH_TOKEN="your_token"
 
 # Check username matches repository owner
@@ -494,9 +465,6 @@ GIT_BASE_URL="https://github.com/your-org"
 ```bash
 # Branch doesn't exist and AUTO_CREATE_BRANCH=false
 AUTO_CREATE_BRANCH=true  # Enable auto-creation
-
-# Or create branch manually first
-git checkout -b your-branch-name
 ```
 
 ### No Files Found
@@ -510,9 +478,8 @@ git checkout -b your-branch-name
 
 The script skips if target file exists. To overwrite:
 ```bash
-# Delete existing files first
 cd repos_temp/repo-name
-rm *.prod.*  # or specific files
+rm *.prod.*  # Delete existing files first
 ```
 
 ### Permission Denied on Push
@@ -523,14 +490,14 @@ rm *.prod.*  # or specific files
 
 ## Log File
 
-The log file tracks:
+The log file (`LOG_FILE`) tracks all operations:
 
 ```
 [2024-02-07 10:30:15] === Git File Rename Script Started ===
 [2024-02-07 10:30:15] Working directory: ./repos_temp
-[2024-02-07 10:30:15] Branch name: prod-configs
+[2024-02-07 10:30:15] Branch name: update-strings
 [2024-02-07 10:30:16] Repository: api-service | Status: CLONED | Details: New clone
-[2024-02-07 10:30:18] Repository: api-service | Status: PUSHED | Details: Branch: prod-configs
+[2024-02-07 10:30:18] Repository: api-service | Status: PUSHED | Details: Branch: update-strings
 [2024-02-07 10:30:20] === Script Completed ===
 [2024-02-07 10:30:20] Total files copied: 3
 [2024-02-07 10:30:20] Successful repos: 1/1
@@ -552,30 +519,10 @@ Create environment-specific configs:
 ```bash
 source config.sh  # Load defaults
 BRANCH_NAME="prod-configs"
-RENAME_PAIRS=("dev|prod")
+declare -a REPLACEMENTS=("dev|prod")
 ```
 
-**config-staging.sh:**
-```bash
-source config.sh
-BRANCH_NAME="staging-configs"
-RENAME_PAIRS=("dev|staging")
-```
-
-### Scripted Automation
-
-```bash
-#!/bin/bash
-# deploy-configs.sh
-
-# Deploy to staging
-export GIT_AUTH_TOKEN=$STAGING_TOKEN
-BRANCH_NAME="staging" ./git_file_rename.sh -p
-
-# Deploy to production
-export GIT_AUTH_TOKEN=$PROD_TOKEN
-BRANCH_NAME="production" ./git_file_rename.sh -p
-```
+Then edit the script to load different configs as needed.
 
 ### Integration with CI/CD
 
@@ -599,20 +546,9 @@ jobs:
           ./git_file_rename.sh -p
 ```
 
-**Jenkins Pipeline:**
-```groovy
-pipeline {
-    agent any
-    stages {
-        stage('Update Files') {
-            steps {
-                withCredentials([string(credentialsId: 'git-token', variable: 'GIT_AUTH_TOKEN')]) {
-                    sh './git_file_rename.sh -p'
-                }
-            }
-        }
-    }
-}
+**Cron Job:**
+```bash
+0 2 * * * cd /path/to/git-file-rename && ./git_file_rename.sh -p >> sync.log 2>&1
 ```
 
 ## Best Practices
@@ -626,7 +562,7 @@ pipeline {
 
 3. **Secure your tokens**
    ```bash
-   # Use environment variables, not hardcoded
+   # Use environment variables
    export GIT_AUTH_TOKEN="your_token"
    
    # Or use secret management
@@ -657,7 +593,7 @@ pipeline {
 - `config.sh` - Configuration file
 - `repos.txt` - Repository list
 - `README.md` - This file
-- `QUICKSTART.md` - Quick reference guide
+- `.gitignore` - Git exclusions
 - `batch_update_log.txt` - Operation log (created on first run)
 
 ## License
@@ -670,11 +606,12 @@ pipeline {
 - Added token-based HTTPS authentication
 - Added SSH authentication support
 - Added branch creation and management
-- Added comprehensive logging
+- Added comprehensive logging with LOG_FILE
 - Added case-sensitive/insensitive matching
-- Added support for repo names (combined with base URL)
+- Added support for repo names (combined with GIT_BASE_URL)
 - Enhanced error handling
 - Multi-line commit message support
+- Standardized on REPLACEMENTS array name
 
 ### Version 1.0.0
 - Initial bash version
