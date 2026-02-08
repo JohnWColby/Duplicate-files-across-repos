@@ -42,8 +42,14 @@ GIT_AUTH_TOKEN="${GIT_AUTH_TOKEN:-}"
 # Branch Configuration
 #############################################################
 
+# Branch to checkout before making changes
+# If empty, uses the current/default branch after cloning
+# If set, will checkout this branch before making any file changes
+BASE_BRANCH=""
+
 # Branch name to create for changes
-# If empty, works on the current/default branch
+# If empty, makes changes on the current branch (BASE_BRANCH or default)
+# If set, creates a new branch from BASE_BRANCH for the changes
 BRANCH_NAME="update-strings"
 
 # Automatically create branches if they don't exist
