@@ -79,8 +79,9 @@ repo3
 
 - 🔐 **Multiple Authentication Methods**: Token-based (HTTPS), SSH, or no authentication
 - 🌿 **Branch Management**: Create and work on specific branches
-- 🔍 **Pattern-Based File Search**: Finds files containing specific strings in their filenames
-- 📝 **Smart File Copying**: Creates renamed copies in the same location as originals
+- 🔍 **Pattern-Based Search**: Finds files and directories containing specific strings in their names
+- 📝 **Smart Copying**: Creates renamed copies of files and directories in the same location
+- 📁 **Directory Support**: Recursively copies entire directories with all contents
 - 🎯 **Multiple Repository Support**: Process multiple repositories in a single run
 - 🗺️ **Pipe-Delimited Mappings**: Define string substitution rules as `old|new` pairs
 - 📊 **Case Sensitivity Control**: Choose case-sensitive or case-insensitive matching
@@ -99,10 +100,10 @@ For each repository in `repos.txt`:
 4. **Fetch and pull** base branch (only if no local commits ahead of remote)
 5. **Create/checkout working branch** (if `BRANCH_NAME` is set)
 6. **Fetch and pull** working branch (only if existing branch with no local commits ahead)
-7. **Search** for all files containing each "old" string in their filename
-8. **Copy** each matching file to the same location
+7. **Search** for all files and directories containing each "old" string in their name
+8. **Copy** each matching file or directory (with all contents) to the same location
 9. **Rename** the copy by replacing "old" with "new" string
-10. **Skip** if the renamed file already exists or would be identical
+10. **Skip** if the renamed item already exists or would be identical
 11. **Commit and push** (if `-p` flag used)
 12. **Log** all operations to log file
 
@@ -135,6 +136,9 @@ backend/
 ├── config.dev.yaml
 ├── database.dev.json
 ├── api.test.js
+├── scripts.dev/
+│   ├── deploy.sh
+│   └── backup.sh
 └── utils.js
 ```
 
@@ -152,6 +156,12 @@ backend/ (on branch: add-prod-configs)
 ├── database.prod.json      ← NEW (copy of database.dev.json)
 ├── api.test.js
 ├── api.final.js            ← NEW (copy of api.test.js)
+├── scripts.dev/
+│   ├── deploy.sh
+│   └── backup.sh
+├── scripts.prod/           ← NEW (copy of scripts.dev/ directory)
+│   ├── deploy.sh
+│   └── backup.sh
 └── utils.js
 
 Commits created and pushed to: add-prod-configs
@@ -413,7 +423,7 @@ export GIT_AUTH_TOKEN="ghp_your_token"
 
 ## Use Cases
 
-### 1. Environment Configuration Files
+### 1. Environment Configuration Files and Directories
 ```bash
 declare -a REPLACEMENTS=(
     "dev|prod"
@@ -421,7 +431,11 @@ declare -a REPLACEMENTS=(
     "staging|prod"
 )
 ```
-Creates production versions of dev configs.
+Creates production versions of dev configs and entire configuration directories.
+
+**Example:**
+- `config.dev.yaml` → `config.prod.yaml`
+- `environments.dev/` → `environments.prod/` (entire directory)
 
 ### 2. Version Migration
 ```bash
@@ -431,7 +445,11 @@ declare -a REPLACEMENTS=(
     "old|new"
 )
 ```
-Creates next version copies of versioned files.
+Creates next version copies of versioned files and directories.
+
+**Example:**
+- `api-v1.js` → `api-v2.js`
+- `schemas-v1/` → `schemas-v2/` (all schema files)
 
 ### 3. Testing to Production
 ```bash
@@ -441,7 +459,11 @@ declare -a REPLACEMENTS=(
     "sample|live"
 )
 ```
-Duplicates test files for production use.
+Duplicates test files and directories for production use.
+
+**Example:**
+- `database.test.json` → `database.prod.json`
+- `fixtures.test/` → `fixtures.prod/` (test data directories)
 
 ### 4. Multi-Environment Deployment
 ```bash
@@ -451,6 +473,10 @@ declare -a REPLACEMENTS=(
     "internal|external"
 )
 ```
+
+**Example:**
+- `config.local.yaml` → `config.cloud.yaml`
+- `scripts.onprem/` → `scripts.aws/` (deployment script directories)
 
 ## Output Example
 
@@ -464,7 +490,8 @@ Git File Rename - Starting
 ℹ Repositories to process: 2
 ℹ Replacements: 2
 ℹ Case sensitive: true
-ℹ Branch: add-prod-configs
+ℹ Base branch: main
+ℹ Working branch: add-prod-configs
 ℹ Authentication: token
 
 Replacement mappings:
@@ -475,16 +502,22 @@ Replacement mappings:
 Processing repository: backend
 ======================================================================
 ✓ Successfully cloned
+ℹ Checking out base branch: main
+✓ Checked out base branch: main
+ℹ Pulling latest changes from origin/main...
+✓ Successfully pulled latest changes
 ℹ Creating new branch: add-prod-configs
 
-ℹ Searching for files containing 'dev' in filename...
-  Found 2 file(s)
-  Processing: config.dev.yaml
-✓ Created: config.prod.yaml
-  Processing: database.dev.json
-✓ Created: database.prod.json
+ℹ Searching for files/directories containing 'dev' in name...
+  Found 3 item(s)
+  Processing file: config.dev.yaml
+✓ Created file: config.prod.yaml
+  Processing file: database.dev.json
+✓ Created file: database.prod.json
+  Processing directory: scripts.dev/
+✓ Created directory: scripts.prod/
 
-Files copied in backend: 2
+Items copied in backend: 3
 
 ======================================================================
 Git Push Operations
@@ -494,7 +527,7 @@ Git Push Operations
 ======================================================================
 Summary
 ======================================================================
-Total files copied: 2
+Total items copied: 3
 Successful repositories: 1/1
 Log file: ./batch_update_log.txt
 ✓ Operation completed successfully!
