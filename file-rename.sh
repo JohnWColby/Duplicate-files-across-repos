@@ -401,76 +401,95 @@ git_add_commit_push() {
 # File Processing Functions
 #############################################################
 
-find_files_with_pattern() {
+find_files_and_dirs_with_pattern() {
     local repo_dir="$1"
     local pattern="$2"
     local case_sensitive="$3"
-    local -n files_array=$4  # nameref to return array
+    local -n items_array=$4  # nameref to return array
     
-    files_array=()
+    items_array=()
     
     if [ "$case_sensitive" = "true" ]; then
-        # Case-sensitive search
-        while IFS= read -r -d '' file; do
-            local filename=$(basename "$file")
-            if [[ "$filename" == *"$pattern"* ]]; then
-                files_array+=("$file")
+        # Case-sensitive search for both files and directories
+        while IFS= read -r -d '' item; do
+            local itemname=$(basename "$item")
+            if [[ "$itemname" == *"$pattern"* ]]; then
+                items_array+=("$item")
             fi
-        done < <(find "$repo_dir" -type f -not -path "*/.git/*" -print0)
+        done < <(find "$repo_dir" \( -type f -o -type d \) -not -path "*/.git/*" -not -path "*/.git" -print0)
     else
-        # Case-insensitive search
-        while IFS= read -r -d '' file; do
-            local filename=$(basename "$file")
-            local filename_lower="${filename,,}"
+        # Case-insensitive search for both files and directories
+        while IFS= read -r -d '' item; do
+            local itemname=$(basename "$item")
+            local itemname_lower="${itemname,,}"
             local pattern_lower="${pattern,,}"
-            if [[ "$filename_lower" == *"$pattern_lower"* ]]; then
-                files_array+=("$file")
+            if [[ "$itemname_lower" == *"$pattern_lower"* ]]; then
+                items_array+=("$item")
             fi
-        done < <(find "$repo_dir" -type f -not -path "*/.git/*" -print0)
+        done < <(find "$repo_dir" \( -type f -o -type d \) -not -path "*/.git/*" -not -path "*/.git" -print0)
     fi
 }
 
 create_renamed_copy() {
-    local original_file="$1"
+    local original_item="$1"
     local old_str="$2"
     local new_str="$3"
     local case_sensitive="$4"
     local dry_run="$5"
     
-    local dir=$(dirname "$original_file")
-    local filename=$(basename "$original_file")
+    local dir=$(dirname "$original_item")
+    local itemname=$(basename "$original_item")
     
     # Perform replacement based on case sensitivity
-    local new_filename
+    local new_itemname
     if [ "$case_sensitive" = "true" ]; then
-        new_filename="${filename//$old_str/$new_str}"
+        new_itemname="${itemname//$old_str/$new_str}"
     else
         # Case-insensitive replacement using sed
-        new_filename=$(echo "$filename" | sed "s/$old_str/$new_str/gI")
+        new_itemname=$(echo "$itemname" | sed "s/$old_str/$new_str/gI")
     fi
     
-    # Skip if filename would be the same
-    if [ "$filename" = "$new_filename" ]; then
+    # Skip if name would be the same
+    if [ "$itemname" = "$new_itemname" ]; then
         return 1
     fi
     
-    local new_file="$dir/$new_filename"
+    local new_item="$dir/$new_itemname"
     
     # Check if target already exists
-    if [ -f "$new_file" ]; then
-        echo "    $(print_warning "Target file already exists: $new_filename")"
+    if [ -e "$new_item" ]; then
+        echo "    $(print_warning "Target already exists: $new_itemname")"
         return 1
     fi
     
     if [ "$dry_run" = "true" ]; then
-        echo "    [DRY RUN] Would copy to: $new_filename"
+        if [ -d "$original_item" ]; then
+            echo "    [DRY RUN] Would copy directory to: $new_itemname/"
+        else
+            echo "    [DRY RUN] Would copy file to: $new_itemname"
+        fi
         return 0
     else
-        if cp "$original_file" "$new_file"; then
-            print_success "Created: $new_filename"
-            return 0
+        # Handle directories
+        if [ -d "$original_item" ]; then
+            if cp -r "$original_item" "$new_item"; then
+                print_success "Created directory: $new_itemname/"
+                return 0
+            else
+                print_error "Failed to copy directory"
+                return 1
+            fi
+        # Handle files
+        elif [ -f "$original_item" ]; then
+            if cp "$original_item" "$new_item"; then
+                print_success "Created file: $new_itemname"
+                return 0
+            else
+                print_error "Failed to copy file"
+                return 1
+            fi
         else
-            print_error "Failed to copy file"
+            print_warning "Skipping: neither file nor directory: $itemname"
             return 1
         fi
     fi
@@ -520,32 +539,38 @@ process_repository() {
         new_str=$(echo "$new_str" | xargs)
         
         echo ""
-        print_info "Searching for files containing '$old_str' in filename..."
+        print_info "Searching for files/directories containing '$old_str' in name..."
         
-        # Find matching files
-        local matching_files=()
-        find_files_with_pattern "$repo_dir" "$old_str" "$CASE_SENSITIVE" matching_files
+        # Find matching files and directories
+        local matching_items=()
+        find_files_and_dirs_with_pattern "$repo_dir" "$old_str" "$CASE_SENSITIVE" matching_items
         
-        if [ ${#matching_files[@]} -eq 0 ]; then
-            echo "  No files found with '$old_str' in filename"
+        if [ ${#matching_items[@]} -eq 0 ]; then
+            echo "  No files or directories found with '$old_str' in name"
             continue
         fi
         
-        echo "  Found ${#matching_files[@]} file(s)"
+        echo "  Found ${#matching_items[@]} item(s)"
         
-        # Process each matching file
-        for file in "${matching_files[@]}"; do
-            local rel_path="${file#$repo_dir/}"
-            echo "  Processing: $rel_path"
+        # Process each matching item
+        for item in "${matching_items[@]}"; do
+            local rel_path="${item#$repo_dir/}"
             
-            if create_renamed_copy "$file" "$old_str" "$new_str" "$CASE_SENSITIVE" "$dry_run"; then
+            # Determine if file or directory
+            if [ -d "$item" ]; then
+                echo "  Processing directory: $rel_path/"
+            else
+                echo "  Processing file: $rel_path"
+            fi
+            
+            if create_renamed_copy "$item" "$old_str" "$new_str" "$CASE_SENSITIVE" "$dry_run"; then
                 files_copied=$((files_copied + 1))
             fi
         done
     done
     
     echo ""
-    echo "Files copied in $repo_name: $files_copied"
+    echo "Items copied in $repo_name: $files_copied"
     
     # Return the count
     return $files_copied
@@ -687,7 +712,7 @@ main() {
     echo ""
     print_header "Summary"
     
-    echo "Total files copied: $total_files_copied"
+    echo "Total items copied: $total_files_copied"
     echo "Successful repositories: $successful_repos/$total_repos"
     echo "Log file: $LOG_FILE"
     
@@ -697,7 +722,7 @@ main() {
     fi
     
     log_to_file "=== Script Completed ==="
-    log_to_file "Total files copied: $total_files_copied"
+    log_to_file "Total items copied: $total_files_copied"
     log_to_file "Successful repos: $successful_repos/$total_repos"
     
     echo ""
