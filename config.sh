@@ -44,31 +44,26 @@ GIT_AUTH_TOKEN="${GIT_AUTH_TOKEN:-}"
 
 # Branch name to create for changes
 # If empty, works on the current/default branch
-BRANCH_NAME="update-file-copies"
+BRANCH_NAME="update-strings"
+
+# Automatically create branches if they don't exist
+AUTO_CREATE_BRANCH=true
 
 #############################################################
-# Rename Mappings
+# Find/Replace Mappings
 #############################################################
 
-# Array of rename pairs in format "old_string|new_string"
+# Find/Replace mappings (add as many as needed)
+# Format: "old_string|new_string"
 # Files containing old_string in their filename will be copied
 # and renamed with new_string replacing old_string
-RENAME_PAIRS=(
-    "dev|prod"
-    "staging|production"
-    "test|final"
-    "v1|v2"
-)
-
-# Alternative name for compatibility with other scripts
 declare -a REPLACEMENTS=(
-    "dev|prod"
-    "staging|production"
-    "test|final"
-    "v1|v2"
+    "oldString1|newString1"
+    "oldString2|newString2"
+    "TODO: update this|DONE: updated"
 )
 
-# Case sensitivity for filename matching (true/false)
+# Case sensitivity for find/replace operations (true/false)
 # If false, will match patterns case-insensitively
 CASE_SENSITIVE=true
 
@@ -76,23 +71,15 @@ CASE_SENSITIVE=true
 # Working Directory
 #############################################################
 
-# Directory where repositories will be cloned
-# Will be created if it doesn't exist
+# Working directory for cloning repos (will be created if it doesn't exist)
 WORK_DIR="./repos_temp"
 
 #############################################################
 # Git Configuration
 #############################################################
 
-# Commit message for changes
-# Supports multi-line messages
-COMMIT_MESSAGE="Add renamed file copies
-
-This commit creates production copies of development files
-by renaming files based on configured string replacements."
-
-# Default commit message if above is not set
-DEFAULT_COMMIT_MESSAGE="Add renamed file copies"
+# Commit message (supports multi-line)
+COMMIT_MESSAGE="Update string replacements across repository"
 
 # Git author information
 # These can be overridden by global git config
@@ -105,7 +92,7 @@ export GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-$GIT_AUTHOR_EMAIL}"
 # Logging Configuration
 #############################################################
 
-# Log file for tracking completed repos and operations
+# Log file for tracking completed repos and PR URLs
 LOG_FILE="./batch_update_log.txt"
 
 # Enable verbose logging (true/false)
@@ -120,9 +107,6 @@ VERBOSE=false
 
 # Set to true to continue on errors (not recommended)
 CONTINUE_ON_ERROR=false
-
-# Automatically create branches if they don't exist
-AUTO_CREATE_BRANCH=true
 
 # Push changes automatically (can be overridden by command line)
 AUTO_PUSH=false
