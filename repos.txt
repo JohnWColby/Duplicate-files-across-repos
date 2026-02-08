@@ -1,0 +1,19 @@
+# Repository List
+# 
+# Add repositories in one of these formats:
+#
+# 1. Full URL (HTTPS or SSH):
+#    https://github.com/username/repo1.git
+#    git@github.com:username/repo2.git
+#
+# 2. Repository name only (will be combined with GIT_BASE_URL from config.sh):
+#    repo1
+#    repo2
+#
+# Comments (lines starting with #) and empty lines are ignored
+
+# Example repositories (uncomment and modify):
+# https://github.com/username/repo1.git
+# git@github.com:username/repo2.git
+# repo3
+# repo4
