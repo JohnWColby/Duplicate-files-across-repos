@@ -20,9 +20,10 @@ fi
 
 source "$CONFIG_FILE"
 
-# Use REPLACEMENTS if RENAME_PAIRS is empty (for compatibility)
-if [ ${#RENAME_PAIRS[@]} -eq 0 ] && [ ${#REPLACEMENTS[@]} -gt 0 ]; then
-    RENAME_PAIRS=("${REPLACEMENTS[@]}")
+# Use REPLACEMENTS array (preferred name)
+if [ ${#REPLACEMENTS[@]} -eq 0 ]; then
+    echo "Error: REPLACEMENTS array is empty in config.sh"
+    exit 1
 fi
 
 #############################################################
@@ -173,9 +174,9 @@ validate_config() {
         errors=$((errors + 1))
     fi
     
-    # Check if rename pairs are defined
-    if [ ${#RENAME_PAIRS[@]} -eq 0 ]; then
-        print_error "No rename pairs defined in RENAME_PAIRS array"
+    # Check if replacements are defined
+    if [ ${#REPLACEMENTS[@]} -eq 0 ]; then
+        print_error "No replacements defined in REPLACEMENTS array"
         errors=$((errors + 1))
     fi
     
@@ -420,8 +421,8 @@ process_repository() {
     
     local files_copied=0
     
-    # Process each rename pair
-    for pair in "${RENAME_PAIRS[@]}"; do
+    # Process each replacement
+    for pair in "${REPLACEMENTS[@]}"; do
         # Split by pipe character
         IFS='|' read -r old_str new_str <<< "$pair"
         
@@ -468,7 +469,7 @@ process_repository() {
 main() {
     local dry_run="false"
     local push_changes="$AUTO_PUSH"
-    local commit_message="${COMMIT_MESSAGE:-$DEFAULT_COMMIT_MESSAGE}"
+    local commit_message="$COMMIT_MESSAGE"
     
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
@@ -495,7 +496,7 @@ main() {
                 echo "  -h, --help          Show this help message"
                 echo ""
                 echo "Configuration:"
-                echo "  Edit config.sh to configure repositories, rename mappings,"
+                echo "  Edit config.sh to configure repositories, replacements,"
                 echo "  authentication, and other settings."
                 echo ""
                 exit 0
@@ -533,15 +534,15 @@ main() {
     local repo_count=$(grep -v '^#' "$REPO_LIST_FILE" | grep -v '^[[:space:]]*$' | wc -l)
     echo ""
     print_info "Repositories to process: $repo_count"
-    print_info "Rename mappings: ${#RENAME_PAIRS[@]}"
+    print_info "Replacements: ${#REPLACEMENTS[@]}"
     print_info "Case sensitive: $CASE_SENSITIVE"
     print_info "Branch: ${BRANCH_NAME:-default}"
     print_info "Authentication: $GIT_AUTH_METHOD"
     
-    # Show rename mappings
+    # Show replacements
     echo ""
-    echo "Rename map:"
-    for pair in "${RENAME_PAIRS[@]}"; do
+    echo "Replacement mappings:"
+    for pair in "${REPLACEMENTS[@]}"; do
         IFS='|' read -r old_str new_str <<< "$pair"
         old_str=$(echo "$old_str" | xargs)
         new_str=$(echo "$new_str" | xargs)
