@@ -239,22 +239,106 @@ clone_repository() {
     fi
 }
 
+checkout_base_branch() {
+    local repo_dir="$1"
+    local base_branch="$2"
+    
+    # If no base branch specified, use whatever is current
+    if [ -z "$base_branch" ]; then
+        return 0
+    fi
+    
+    cd "$repo_dir"
+    
+    # Get current branch
+    local current_branch=$(git branch --show-current)
+    
+    # Check if we need to checkout
+    local need_checkout=true
+    if [ "$current_branch" = "$base_branch" ]; then
+        print_info "Already on base branch: $base_branch"
+        need_checkout=false
+    fi
+    
+    # Checkout if needed
+    if [ "$need_checkout" = "true" ]; then
+        print_info "Checking out base branch: $base_branch"
+        
+        # Try to checkout the branch
+        if git checkout "$base_branch" &> /dev/null; then
+            print_success "Checked out base branch: $base_branch"
+        else
+            # Branch might not exist locally, try fetching
+            print_info "Branch not found locally, trying to fetch from remote..."
+            if git fetch origin "$base_branch:$base_branch" &> /dev/null && git checkout "$base_branch" &> /dev/null; then
+                print_success "Fetched and checked out base branch: $base_branch"
+            else
+                print_error "Failed to checkout base branch: $base_branch"
+                print_warning "Continuing with current branch: $current_branch"
+                cd - > /dev/null
+                return 1
+            fi
+        fi
+    fi
+    
+    # Now we're on the base branch - check if we should pull
+    # Fetch the latest remote information
+    git fetch origin "$base_branch" &> /dev/null
+    
+    # Check if local branch has commits ahead of remote
+    local commits_ahead=$(git rev-list --count origin/"$base_branch"..HEAD 2>/dev/null || echo "0")
+    
+    if [ "$commits_ahead" = "0" ]; then
+        # No local commits ahead, safe to pull
+        print_info "Pulling latest changes from origin/$base_branch..."
+        if git pull origin "$base_branch" &> /dev/null; then
+            print_success "Successfully pulled latest changes"
+        else
+            print_warning "Failed to pull changes (continuing anyway)"
+        fi
+    else
+        print_info "Local branch has $commits_ahead commit(s) ahead of remote - skipping pull"
+    fi
+    
+    cd - > /dev/null
+    return 0
+}
+
 create_or_checkout_branch() {
     local repo_dir="$1"
     local branch_name="$2"
     
-    # If no branch name specified, stay on default branch
+    # If no branch name specified, stay on current branch
     if [ -z "$branch_name" ]; then
         return 0
     fi
     
     cd "$repo_dir"
     
-    # Check if branch already exists
+    # Check if branch already exists locally
     if git show-ref --verify --quiet "refs/heads/$branch_name"; then
         print_info "Checking out existing branch: $branch_name"
         git checkout "$branch_name" &> /dev/null
+        
+        # Fetch and check if we should pull
+        git fetch origin "$branch_name" &> /dev/null 2>&1
+        
+        # Check if local branch has commits ahead of remote
+        local commits_ahead=$(git rev-list --count origin/"$branch_name"..HEAD 2>/dev/null || echo "0")
+        
+        if [ "$commits_ahead" = "0" ]; then
+            # No local commits ahead, safe to pull
+            print_info "Pulling latest changes from origin/$branch_name..."
+            if git pull origin "$branch_name" &> /dev/null 2>&1; then
+                print_success "Successfully pulled latest changes"
+            else
+                print_info "No remote tracking branch or pull not needed"
+            fi
+        else
+            print_info "Local branch has $commits_ahead commit(s) ahead of remote - skipping pull"
+        fi
     else
+        # Branch doesn't exist locally
         if [ "$AUTO_CREATE_BRANCH" = "true" ]; then
             print_info "Creating new branch: $branch_name"
             git checkout -b "$branch_name" &> /dev/null
@@ -412,7 +496,12 @@ process_repository() {
         return 1
     fi
     
-    # Create or checkout branch if specified
+    # Checkout base branch if specified
+    if [ -n "$BASE_BRANCH" ]; then
+        checkout_base_branch "$repo_dir" "$BASE_BRANCH"
+    fi
+    
+    # Create or checkout working branch if specified
     if [ -n "$BRANCH_NAME" ]; then
         if ! create_or_checkout_branch "$repo_dir" "$BRANCH_NAME"; then
             print_warning "Could not create/checkout branch, continuing on current branch"
@@ -521,7 +610,8 @@ main() {
     mkdir -p "$(dirname "$LOG_FILE")"
     log_to_file "=== Git File Rename Script Started ==="
     log_to_file "Working directory: $WORK_DIR"
-    log_to_file "Branch name: ${BRANCH_NAME:-default}"
+    log_to_file "Base branch: ${BASE_BRANCH:-default}"
+    log_to_file "Working branch: ${BRANCH_NAME:-current}"
     log_to_file "Dry run: $dry_run"
     
     # Setup authentication
@@ -536,7 +626,8 @@ main() {
     print_info "Repositories to process: $repo_count"
     print_info "Replacements: ${#REPLACEMENTS[@]}"
     print_info "Case sensitive: $CASE_SENSITIVE"
-    print_info "Branch: ${BRANCH_NAME:-default}"
+    print_info "Base branch: ${BASE_BRANCH:-current}"
+    print_info "Working branch: ${BRANCH_NAME:-current}"
     print_info "Authentication: $GIT_AUTH_METHOD"
     
     # Show replacements
