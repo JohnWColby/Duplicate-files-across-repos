@@ -116,3 +116,8 @@ CONTINUE_ON_ERROR=false
 
 # Push changes automatically (can be overridden by command line)
 AUTO_PUSH=false
+
+# Fix mode: if true, only updates content in existing files/directories that contain
+# the mapping VALUES (new strings), replacing any occurrences of the mapping KEYS (old strings)
+# Does NOT create new copies - only fixes content in files that match the new pattern
+FIX_MODE=false
