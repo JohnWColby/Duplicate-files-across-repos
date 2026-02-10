@@ -73,6 +73,10 @@ repo3
 
 # Custom commit message
 ./git_file_rename.sh -p -m "Add production configs"
+
+# Fix mode: update content in existing files only (no copying)
+./git_file_rename.sh --fix-content
+./git_file_rename.sh --fix-content -p  # Fix and push
 ```
 
 ## Features
@@ -81,6 +85,7 @@ repo3
 - 🌿 **Branch Management**: Create and work on specific branches
 - 🔍 **Pattern-Based Search**: Finds files and directories containing specific strings in their names
 - 📝 **Smart Copying**: Creates renamed copies of files and directories in the same location
+- 🔄 **Content Replacement**: Automatically replaces old strings with new strings inside copied files
 - 📁 **Directory Support**: Recursively copies entire directories with all contents
 - 🎯 **Multiple Repository Support**: Process multiple repositories in a single run
 - 🗺️ **Pipe-Delimited Mappings**: Define string substitution rules as `old|new` pairs
@@ -92,6 +97,8 @@ repo3
 
 ## How It Works
 
+The script processes each repository **sequentially and completely** before moving to the next one.
+
 For each repository in `repos.txt`:
 
 1. **Authenticate** using configured method (token/SSH/none)
@@ -102,10 +109,21 @@ For each repository in `repos.txt`:
 6. **Fetch and pull** working branch (only if existing branch with no local commits ahead)
 7. **Search** for all files and directories containing each "old" string in their name
 8. **Copy** each matching file or directory (with all contents) to the same location
-9. **Rename** the copy by replacing "old" with "new" string
-10. **Skip** if the renamed item already exists or would be identical
-11. **Commit and push** (if `-p` flag used)
-12. **Log** all operations to log file
+9. **Rename** the copy by replacing "old" with "new" string in the name
+10. **Replace content** within all copied files, changing "old" to "new" strings
+11. **Skip** if the renamed item already exists or would be identical
+12. **Commit and push** changes immediately (if `-p` flag used and changes were made)
+13. **Move to next repository** and repeat
+
+Each repository is processed completely (including git push) before the next repository begins. This ensures that if an error occurs, previous repositories have already been committed and pushed.
+
+### Benefits of Sequential Processing
+
+- **Fault Isolation**: If repo #5 fails, repos #1-4 are already committed and pushed
+- **Progress Visibility**: See each repository complete before the next one starts
+- **Easier Debugging**: Identify exactly which repository had issues
+- **Partial Success**: Some repositories succeed even if others fail
+- **Clean Workflow**: Each repository goes through the complete cycle independently
 
 ### Example
 
@@ -142,6 +160,20 @@ backend/
 └── utils.js
 ```
 
+**Content of `config.dev.yaml`:**
+```yaml
+cluster: backend-dev
+environment: dev
+api_url: https://dev.api.example.com
+```
+
+**Content of `scripts.dev/deploy.sh`:**
+```bash
+#!/bin/bash
+CLUSTER="dev-cluster"
+ENV="dev"
+```
+
 **Command:**
 ```bash
 ./git_file_rename.sh -p
@@ -151,20 +183,34 @@ backend/
 ```
 backend/ (on branch: add-prod-configs)
 ├── config.dev.yaml
-├── config.prod.yaml        ← NEW (copy of config.dev.yaml)
+├── config.prod.yaml        ← NEW (copy with updated content)
 ├── database.dev.json
-├── database.prod.json      ← NEW (copy of database.dev.json)
+├── database.prod.json      ← NEW (copy with updated content)
 ├── api.test.js
-├── api.final.js            ← NEW (copy of api.test.js)
+├── api.final.js            ← NEW (copy with updated content)
 ├── scripts.dev/
 │   ├── deploy.sh
 │   └── backup.sh
-├── scripts.prod/           ← NEW (copy of scripts.dev/ directory)
+├── scripts.prod/           ← NEW (copy with updated content in all files)
 │   ├── deploy.sh
 │   └── backup.sh
 └── utils.js
 
 Commits created and pushed to: add-prod-configs
+```
+
+**Content of `config.prod.yaml` (after copy):**
+```yaml
+cluster: backend-prod      ← Changed from 'backend-dev'
+environment: prod          ← Changed from 'dev'
+api_url: https://prod.api.example.com  ← Changed from 'dev.api'
+```
+
+**Content of `scripts.prod/deploy.sh` (after copy):**
+```bash
+#!/bin/bash
+CLUSTER="prod-cluster"     ← Changed from 'dev-cluster'
+ENV="prod"                 ← Changed from 'dev'
 ```
 
 ### Smart Branch Handling
@@ -198,6 +244,212 @@ Example output when local commits exist:
 ```
 
 This gives you full control over which branch to start from before creating your working branch!
+
+## Content Replacement
+
+The script doesn't just rename files and directories—it also **replaces content** within the copied files.
+
+### How It Works
+
+After copying a file or directory, the script automatically:
+1. **Searches** through all text files in the copy
+2. **Replaces** all occurrences of the old string with the new string
+3. **Preserves** binary files (no changes to images, executables, etc.)
+4. **Respects** case sensitivity settings
+
+### Example
+
+**Original file: `config.dev.yaml`**
+```yaml
+cluster_name: my-app-dev
+environment: dev
+api_url: https://dev.example.com
+database: postgres-dev
+```
+
+**After copying to `config.prod.yaml` with mapping `dev|prod`:**
+```yaml
+cluster_name: my-app-prod      ← Changed
+environment: prod              ← Changed
+api_url: https://prod.example.com  ← Changed
+database: postgres-prod        ← Changed
+```
+
+### Directory Content Replacement
+
+When copying directories, the script replaces content in **all text files** within the directory:
+
+**Original: `scripts.dev/deploy.sh`**
+```bash
+#!/bin/bash
+CLUSTER="dev-cluster"
+NAMESPACE="app-dev"
+```
+
+**After copying to `scripts.prod/deploy.sh`:**
+```bash
+#!/bin/bash
+CLUSTER="prod-cluster"         ← Changed
+NAMESPACE="app-prod"          ← Changed
+```
+
+### Output Example
+
+```
+ℹ Searching for files/directories containing 'dev' in name...
+  Found 2 item(s)
+  Processing file: config.dev.yaml
+✓ Created file: config.prod.yaml
+      → Replaced content in: config.prod.yaml
+  Processing directory: scripts.dev/
+✓ Created directory: scripts.prod/
+      → Replaced content in: deploy.sh
+      → Replaced content in: backup.sh
+      → Replaced content in: config.json
+```
+
+### Safety Features
+
+- **Binary files preserved**: Images, executables, archives are not modified
+- **Smart detection**: Uses `file` command to identify text vs binary
+- **Case sensitivity**: Respects the `CASE_SENSITIVE` setting for content replacement
+- **Dry run preview**: Shows what would be replaced without making changes
+
+### Use Cases
+
+This is particularly useful for:
+- **Environment configs** with cluster names, URLs, database names
+- **Deployment scripts** with environment-specific variables
+- **Infrastructure code** with resource names and identifiers
+- **Configuration files** with service endpoints and credentials
+
+## Fix Mode
+
+**Fix Mode** is designed to update content in files that were already copied/renamed before the content replacement feature was added to the script.
+
+### What is Fix Mode?
+
+Instead of creating new copies, Fix Mode:
+1. **Searches** for files/directories containing the **NEW** pattern (mapping values like "prod")
+2. **Replaces** any occurrences of the **OLD** pattern (mapping keys like "dev") within those files
+3. **Skips** copying or renaming - only updates content
+
+### When to Use Fix Mode
+
+- You ran the script before content replacement was added
+- You manually created prod/staging files that still contain dev/test references
+- You need to update existing files without creating new copies
+- You want to fix files that were incorrectly copied
+
+### How to Use Fix Mode
+
+**Via Command Line:**
+```bash
+# Dry run to see what would be fixed
+./git_file_rename.sh --fix-content -d
+
+# Fix content in existing files
+./git_file_rename.sh --fix-content
+
+# Fix and push changes
+./git_file_rename.sh --fix-content -p -m "Fix content references"
+```
+
+**Via Configuration:**
+```bash
+# In config.sh
+FIX_MODE=true
+
+# Then run normally
+./git_file_rename.sh
+```
+
+### Example Scenario
+
+**Problem:** You have prod files that still reference "dev" internally
+
+**Files:**
+```
+repo/
+├── config.dev.yaml        (cluster: my-app-dev)
+└── config.prod.yaml       (cluster: my-app-dev) ← WRONG!
+```
+
+**Mapping:**
+```bash
+REPLACEMENTS=("dev|prod")
+```
+
+**Fix Mode Behavior:**
+```bash
+./git_file_rename.sh --fix-content
+```
+
+1. Searches for files with "prod" in name → Finds `config.prod.yaml`
+2. Checks if file contains "dev" → Yes it does
+3. Replaces "dev" → "prod" in file content
+
+**Result:**
+```
+repo/
+├── config.dev.yaml        (cluster: my-app-dev)
+└── config.prod.yaml       (cluster: my-app-prod) ← FIXED!
+```
+
+### Fix Mode Output
+
+```
+======================================================================
+Git File Rename - Starting
+======================================================================
+MODE: Fix existing files (content replacement only)
+
+======================================================================
+Processing repository (FIX MODE): backend
+======================================================================
+
+ℹ Searching for files/directories containing 'prod' in name (to fix content)...
+  Found 3 item(s) to check for content replacement
+  Checking file: config.prod.yaml
+      → Replaced content in: config.prod.yaml
+  Checking file: database.prod.json
+      → Replaced content in: database.prod.json
+  Checking directory: scripts.prod/
+✓ Fixed content in 3 file(s) in directory
+      
+Items fixed in backend: 3
+```
+
+### Comparison: Normal Mode vs Fix Mode
+
+| Aspect | Normal Mode | Fix Mode |
+|--------|-------------|----------|
+| Searches for | Files with OLD pattern (dev) | Files with NEW pattern (prod) |
+| Creates copies | Yes | No |
+| Renames files | Yes | No |
+| Updates content | Yes (in new copies) | Yes (in existing files) |
+| Use case | Initial deployment | Fixing existing files |
+
+### Best Practices
+
+1. **Always dry-run first**: Use `-d` to preview changes
+   ```bash
+   ./git_file_rename.sh --fix-content -d
+   ```
+
+2. **Fix mode is idempotent**: Safe to run multiple times on same files
+
+3. **Combine with specific branches**: Fix only specific environments
+   ```bash
+   BASE_BRANCH="staging"
+   BRANCH_NAME="fix-staging-refs"
+   ./git_file_rename.sh --fix-content -p
+   ```
+
+4. **Use meaningful commit messages**:
+   ```bash
+   ./git_file_rename.sh --fix-content -p -m "Fix internal environment references in prod configs"
+   ```
 
 ## Configuration Reference
 
@@ -246,6 +498,9 @@ LOG_FILE="./batch_update_log.txt"
 # Git author info (optional - uses global config if not set)
 export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-Your Name}"
 export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-your.email@example.com}"
+
+# Fix mode: only update content in existing files (no copying/renaming)
+FIX_MODE=false
 ```
 
 ### Configuration Options Explained
@@ -384,6 +639,7 @@ Options:
   -d, --dry-run       Preview changes without copying files
   -p, --push          Commit and push changes after copying
   -m, --message MSG   Commit message (used with --push)
+  -f, --fix-content   Fix mode: only update content in existing files
   -h, --help          Show help message
 ```
 
@@ -421,6 +677,13 @@ export GIT_AUTH_TOKEN="ghp_your_token"
 ./git_file_rename.sh -p
 ```
 
+**7. Fix mode - update existing files:**
+```bash
+./git_file_rename.sh --fix-content -d  # Preview
+./git_file_rename.sh --fix-content     # Execute
+./git_file_rename.sh --fix-content -p  # Execute and push
+```
+
 ## Use Cases
 
 ### 1. Environment Configuration Files and Directories
@@ -432,10 +695,11 @@ declare -a REPLACEMENTS=(
 )
 ```
 Creates production versions of dev configs and entire configuration directories.
+**Also replaces** cluster names, URLs, and environment references inside the files.
 
 **Example:**
-- `config.dev.yaml` → `config.prod.yaml`
-- `environments.dev/` → `environments.prod/` (entire directory)
+- `config.dev.yaml` → `config.prod.yaml` (file renamed + content updated)
+- `environments.dev/` → `environments.prod/` (directory + all file contents updated)
 
 ### 2. Version Migration
 ```bash
@@ -446,10 +710,11 @@ declare -a REPLACEMENTS=(
 )
 ```
 Creates next version copies of versioned files and directories.
+**Also replaces** version strings in API endpoints, schema names, and documentation.
 
 **Example:**
-- `api-v1.js` → `api-v2.js`
-- `schemas-v1/` → `schemas-v2/` (all schema files)
+- `api-v1.js` → `api-v2.js` (API version strings updated in code)
+- `schemas-v1/` → `schemas-v2/` (all schema files with updated version references)
 
 ### 3. Testing to Production
 ```bash
@@ -460,10 +725,11 @@ declare -a REPLACEMENTS=(
 )
 ```
 Duplicates test files and directories for production use.
+**Also replaces** database names, API endpoints, and service URLs.
 
 **Example:**
-- `database.test.json` → `database.prod.json`
-- `fixtures.test/` → `fixtures.prod/` (test data directories)
+- `database.test.json` → `database.prod.json` (connection strings updated)
+- `fixtures.test/` → `fixtures.prod/` (test data directories with updated references)
 
 ### 4. Multi-Environment Deployment
 ```bash
@@ -473,10 +739,11 @@ declare -a REPLACEMENTS=(
     "internal|external"
 )
 ```
+**Also replaces** infrastructure references, resource names, and deployment targets.
 
 **Example:**
-- `config.local.yaml` → `config.cloud.yaml`
-- `scripts.onprem/` → `scripts.aws/` (deployment script directories)
+- `config.local.yaml` → `config.cloud.yaml` (endpoints and credentials updated)
+- `scripts.onprem/` → `scripts.aws/` (deployment scripts with updated cloud providers)
 
 ## Output Example
 
@@ -512,23 +779,62 @@ Processing repository: backend
   Found 3 item(s)
   Processing file: config.dev.yaml
 ✓ Created file: config.prod.yaml
+      → Replaced content in: config.prod.yaml
   Processing file: database.dev.json
 ✓ Created file: database.prod.json
+      → Replaced content in: database.prod.json
   Processing directory: scripts.dev/
 ✓ Created directory: scripts.prod/
+      → Replaced content in: deploy.sh
+      → Replaced content in: backup.sh
+      → Replaced content in: config.json
 
 Items copied in backend: 3
 
 ======================================================================
-Git Push Operations
+Git Push Operations for backend
 ======================================================================
+ℹ Git operations in: backend
+  Adding changes...
+  Committing changes...
+  Pushing to branch: add-prod-configs
+✓ Successfully pushed changes
+
+======================================================================
+Processing repository: frontend
+======================================================================
+✓ Successfully cloned
+ℹ Checking out base branch: main
+✓ Checked out base branch: main
+ℹ Pulling latest changes from origin/main...
+✓ Successfully pulled latest changes
+ℹ Creating new branch: add-prod-configs
+
+ℹ Searching for files/directories containing 'dev' in name...
+  Found 2 item(s)
+  Processing file: env.dev.js
+✓ Created file: env.prod.js
+      → Replaced content in: env.prod.js
+  Processing directory: configs.dev/
+✓ Created directory: configs.prod/
+      → Replaced content in: webpack.config.js
+
+Items copied in frontend: 2
+
+======================================================================
+Git Push Operations for frontend
+======================================================================
+ℹ Git operations in: frontend
+  Adding changes...
+  Committing changes...
+  Pushing to branch: add-prod-configs
 ✓ Successfully pushed changes
 
 ======================================================================
 Summary
 ======================================================================
-Total items copied: 3
-Successful repositories: 1/1
+Total items copied: 5
+Successful repositories: 2/2
 Log file: ./batch_update_log.txt
 ✓ Operation completed successfully!
 ```
@@ -701,11 +1007,40 @@ jobs:
 ## Files
 
 - `git_file_rename.sh` - Main bash script
+- `git_file_rename.py` - Python version (uses same config.sh)
 - `config.sh` - Configuration file
 - `repos.txt` - Repository list
 - `README.md` - This file
 - `.gitignore` - Git exclusions
 - `batch_update_log.txt` - Operation log (created on first run)
+
+## Python Version
+
+A Python version of the script is provided that uses the **same config.sh file** for configuration.
+
+### Usage
+
+```bash
+# Same commands as bash version
+python3 git_file_rename.py -d
+python3 git_file_rename.py
+python3 git_file_rename.py -p
+python3 git_file_rename.py --fix-content
+```
+
+### Advantages
+
+- **Cross-platform**: Works on Windows, macOS, Linux
+- **Same config**: Uses config.sh (no separate configuration needed)
+- **Same features**: All functionality identical to bash version
+- **Better error handling**: More detailed Python exceptions
+
+### Requirements
+
+- Python 3.6 or higher
+- Git 2.0 or higher
+
+The Python version parses config.sh directly, so you only need to maintain one configuration file regardless of which version you use.
 
 ## License
 
