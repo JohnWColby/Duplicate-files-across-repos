@@ -465,8 +465,10 @@ create_renamed_copy() {
     if [ "$dry_run" = "true" ]; then
         if [ -d "$original_item" ]; then
             echo "    [DRY RUN] Would copy directory to: $new_itemname/"
+            echo "    [DRY RUN] Would replace '$old_str' → '$new_str' in all files"
         else
             echo "    [DRY RUN] Would copy file to: $new_itemname"
+            echo "    [DRY RUN] Would replace '$old_str' → '$new_str' in file contents"
         fi
         return 0
     else
@@ -474,6 +476,10 @@ create_renamed_copy() {
         if [ -d "$original_item" ]; then
             if cp -r "$original_item" "$new_item"; then
                 print_success "Created directory: $new_itemname/"
+                
+                # Replace content within all files in the copied directory
+                replace_content_in_directory "$new_item" "$old_str" "$new_str" "$case_sensitive"
+                
                 return 0
             else
                 print_error "Failed to copy directory"
@@ -483,6 +489,10 @@ create_renamed_copy() {
         elif [ -f "$original_item" ]; then
             if cp "$original_item" "$new_item"; then
                 print_success "Created file: $new_itemname"
+                
+                # Replace content within the copied file
+                replace_content_in_file "$new_item" "$old_str" "$new_str" "$case_sensitive"
+                
                 return 0
             else
                 print_error "Failed to copy file"
@@ -493,6 +503,72 @@ create_renamed_copy() {
             return 1
         fi
     fi
+}
+
+replace_content_in_file() {
+    local file="$1"
+    local old_str="$2"
+    local new_str="$3"
+    local case_sensitive="$4"
+    local mode="${5:-verbose}"  # verbose or silent
+    
+    # Skip binary files
+    if ! file "$file" | grep -q "text"; then
+        return 1
+    fi
+    
+    # Check if file contains the old string
+    local contains_old=false
+    if [ "$case_sensitive" = "true" ]; then
+        if grep -q "$old_str" "$file" 2>/dev/null; then
+            contains_old=true
+        fi
+    else
+        if grep -qi "$old_str" "$file" 2>/dev/null; then
+            contains_old=true
+        fi
+    fi
+    
+    # If file doesn't contain old string, nothing to do
+    if [ "$contains_old" = "false" ]; then
+        return 1
+    fi
+    
+    # Escape special characters for sed
+    local escaped_old=$(printf '%s\n' "$old_str" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    local escaped_new=$(printf '%s\n' "$new_str" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    
+    if [ "$case_sensitive" = "true" ]; then
+        # Case-sensitive replacement
+        if sed -i "s/$escaped_old/$escaped_new/g" "$file" 2>/dev/null; then
+            if [ "$mode" = "verbose" ]; then
+                echo "      → Replaced content in: $(basename "$file")"
+            fi
+            return 0
+        fi
+    else
+        # Case-insensitive replacement
+        if sed -i "s/$escaped_old/$escaped_new/gI" "$file" 2>/dev/null; then
+            if [ "$mode" = "verbose" ]; then
+                echo "      → Replaced content in: $(basename "$file")"
+            fi
+            return 0
+        fi
+    fi
+    
+    return 1
+}
+
+replace_content_in_directory() {
+    local dir="$1"
+    local old_str="$2"
+    local new_str="$3"
+    local case_sensitive="$4"
+    
+    # Find all files in the directory (excluding .git)
+    while IFS= read -r -d '' file; do
+        replace_content_in_file "$file" "$old_str" "$new_str" "$case_sensitive"
+    done < <(find "$dir" -type f -not -path "*/.git/*" -print0)
 }
 
 #############################################################
@@ -547,6 +623,115 @@ process_repository() {
         
         if [ ${#matching_items[@]} -eq 0 ]; then
             echo "  No files or directories found with '$old_str' in name"
+
+process_repository_fix_mode() {
+    local repo_input="$1"
+    local dry_run="$2"
+    
+    # Construct full repository URL
+    local repo_url=$(construct_repo_url "$repo_input")
+    local repo_name=$(get_repo_name "$repo_url")
+    local repo_dir="$WORK_DIR/$repo_name"
+    
+    print_header "Processing repository (FIX MODE): $repo_name"
+    
+    # Clone repository if needed
+    if ! clone_repository "$repo_url" "$repo_dir"; then
+        return 1
+    fi
+    
+    # Checkout base branch if specified
+    if [ -n "$BASE_BRANCH" ]; then
+        checkout_base_branch "$repo_dir" "$BASE_BRANCH"
+    fi
+    
+    # Create or checkout working branch if specified
+    if [ -n "$BRANCH_NAME" ]; then
+        if ! create_or_checkout_branch "$repo_dir" "$BRANCH_NAME"; then
+            print_warning "Could not create/checkout branch, continuing on current branch"
+        fi
+    fi
+    
+    local files_fixed=0
+    
+    # Process each replacement - search for files containing the NEW value
+    for pair in "${REPLACEMENTS[@]}"; do
+        # Split by pipe character
+        IFS='|' read -r old_str new_str <<< "$pair"
+        
+        # Trim whitespace
+        old_str=$(echo "$old_str" | xargs)
+        new_str=$(echo "$new_str" | xargs)
+        
+        echo ""
+        print_info "Searching for files/directories containing '$new_str' in name (to fix content)..."
+        
+        # Find files/directories containing the NEW string (value)
+        local matching_items=()
+        find_files_and_dirs_with_pattern "$repo_dir" "$new_str" "$CASE_SENSITIVE" matching_items
+        
+        if [ ${#matching_items[@]} -eq 0 ]; then
+            echo "  No files or directories found with '$new_str' in name"
+            continue
+        fi
+        
+        echo "  Found ${#matching_items[@]} item(s) to check for content replacement"
+        
+        # Process each matching item - replace OLD string in content
+        for item in "${matching_items[@]}"; do
+            local rel_path="${item#$repo_dir/}"
+            
+            # Check if it's a file or directory
+            if [ -d "$item" ]; then
+                echo "  Checking directory: $rel_path/"
+                
+                if [ "$dry_run" = "true" ]; then
+                    echo "    [DRY RUN] Would replace '$old_str' → '$new_str' in all files"
+                    files_fixed=$((files_fixed + 1))
+                else
+                    # Replace content in all files in the directory
+                    local replaced_count=0
+                    while IFS= read -r -d '' file; do
+                        if replace_content_in_file "$file" "$old_str" "$new_str" "$CASE_SENSITIVE" "silent"; then
+                            replaced_count=$((replaced_count + 1))
+                        fi
+                    done < <(find "$item" -type f -not -path "*/.git/*" -print0)
+                    
+                    if [ $replaced_count -gt 0 ]; then
+                        print_success "Fixed content in $replaced_count file(s) in directory"
+                        files_fixed=$((files_fixed + 1))
+                    else
+                        echo "    No changes needed in directory"
+                    fi
+                fi
+            else
+                echo "  Checking file: $rel_path"
+                
+                if [ "$dry_run" = "true" ]; then
+                    # Check if file contains the old string
+                    if grep -q "$old_str" "$item" 2>/dev/null; then
+                        echo "    [DRY RUN] Would replace '$old_str' → '$new_str' in file"
+                        files_fixed=$((files_fixed + 1))
+                    else
+                        echo "    No changes needed"
+                    fi
+                else
+                    if replace_content_in_file "$item" "$old_str" "$new_str" "$CASE_SENSITIVE" "verbose"; then
+                        files_fixed=$((files_fixed + 1))
+                    else
+                        echo "    No changes needed"
+                    fi
+                fi
+            fi
+        done
+    done
+    
+    echo ""
+    echo "Items fixed in $repo_name: $files_fixed"
+    
+    # Return the count
+    return $files_fixed
+}
             continue
         fi
         
@@ -584,6 +769,7 @@ main() {
     local dry_run="false"
     local push_changes="$AUTO_PUSH"
     local commit_message="$COMMIT_MESSAGE"
+    local fix_mode="$FIX_MODE"
     
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
@@ -600,6 +786,10 @@ main() {
                 commit_message="$2"
                 shift 2
                 ;;
+            -f|--fix-content|--fix)
+                fix_mode="true"
+                shift
+                ;;
             -h|--help)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
@@ -607,11 +797,20 @@ main() {
                 echo "  -d, --dry-run       Preview changes without copying files"
                 echo "  -p, --push          Commit and push changes after copying"
                 echo "  -m, --message MSG   Commit message (used with --push)"
+                echo "  -f, --fix-content   Fix mode: only update content in existing files"
+                echo "                      that match the new pattern (no copying)"
                 echo "  -h, --help          Show this help message"
                 echo ""
                 echo "Configuration:"
                 echo "  Edit config.sh to configure repositories, replacements,"
                 echo "  authentication, and other settings."
+                echo ""
+                echo "Fix Mode:"
+                echo "  When --fix-content is used, the script searches for files/directories"
+                echo "  containing the mapping VALUES (new strings) and replaces any"
+                echo "  occurrences of the mapping KEYS (old strings) within those files."
+                echo "  This is useful for fixing files that were copied before content"
+                echo "  replacement was added to the script."
                 echo ""
                 exit 0
                 ;;
@@ -625,6 +824,12 @@ main() {
     
     print_header "Git File Rename - Starting"
     
+    if [ "$fix_mode" = "true" ]; then
+        echo "MODE: Fix existing files (content replacement only)"
+    else
+        echo "MODE: Copy and rename files/directories"
+    fi
+    
     echo "Config file: $CONFIG_FILE"
     echo "Repository list: $REPO_LIST_FILE"
     echo "Working directory: $WORK_DIR"
@@ -634,6 +839,7 @@ main() {
     # Initialize log file
     mkdir -p "$(dirname "$LOG_FILE")"
     log_to_file "=== Git File Rename Script Started ==="
+    log_to_file "Mode: $([ "$fix_mode" = "true" ] && echo "Fix content only" || echo "Copy and rename")"
     log_to_file "Working directory: $WORK_DIR"
     log_to_file "Base branch: ${BASE_BRANCH:-default}"
     log_to_file "Working branch: ${BRANCH_NAME:-current}"
@@ -673,8 +879,6 @@ main() {
     local successful_repos=0
     local total_repos=0
     
-    local repos_with_changes=()
-    
     while IFS= read -r repo_input; do
         # Skip comments and empty lines
         [[ "$repo_input" =~ ^#.*$ ]] && continue
@@ -683,30 +887,45 @@ main() {
         total_repos=$((total_repos + 1))
         
         echo ""
-        if process_repository "$repo_input" "$dry_run"; then
-            local copied=$?
-            successful_repos=$((successful_repos + 1))
-            total_files_copied=$((total_files_copied + copied))
-            
-            if [ $copied -gt 0 ]; then
-                local repo_url=$(construct_repo_url "$repo_input")
-                local repo_name=$(get_repo_name "$repo_url")
-                repos_with_changes+=("$repo_name")
+        
+        if [ "$fix_mode" = "true" ]; then
+            # Fix mode: update content in existing files
+            if process_repository_fix_mode "$repo_input" "$dry_run"; then
+                local fixed=$?
+                successful_repos=$((successful_repos + 1))
+                total_files_copied=$((total_files_copied + fixed))
+                
+                # Git operations for this repository if changes were made
+                if [ $fixed -gt 0 ] && [ "$push_changes" = "true" ] && [ "$dry_run" = "false" ]; then
+                    local repo_url=$(construct_repo_url "$repo_input")
+                    local repo_name=$(get_repo_name "$repo_url")
+                    local repo_dir="$WORK_DIR/$repo_name"
+                    
+                    echo ""
+                    print_header "Git Push Operations for $repo_name"
+                    git_add_commit_push "$repo_dir" "$commit_message" "$BRANCH_NAME"
+                fi
+            fi
+        else
+            # Normal mode: copy and rename
+            if process_repository "$repo_input" "$dry_run"; then
+                local copied=$?
+                successful_repos=$((successful_repos + 1))
+                total_files_copied=$((total_files_copied + copied))
+                
+                # Git operations for this repository if changes were made
+                if [ $copied -gt 0 ] && [ "$push_changes" = "true" ] && [ "$dry_run" = "false" ]; then
+                    local repo_url=$(construct_repo_url "$repo_input")
+                    local repo_name=$(get_repo_name "$repo_url")
+                    local repo_dir="$WORK_DIR/$repo_name"
+                    
+                    echo ""
+                    print_header "Git Push Operations for $repo_name"
+                    git_add_commit_push "$repo_dir" "$commit_message" "$BRANCH_NAME"
+                fi
             fi
         fi
     done < "$REPO_LIST_FILE"
-    
-    # Git operations if requested
-    if [ "$push_changes" = "true" ] && [ "$dry_run" = "false" ]; then
-        echo ""
-        print_header "Git Push Operations"
-        
-        for repo_name in "${repos_with_changes[@]}"; do
-            local repo_dir="$WORK_DIR/$repo_name"
-            echo ""
-            git_add_commit_push "$repo_dir" "$commit_message" "$BRANCH_NAME"
-        done
-    fi
     
     # Summary
     echo ""
