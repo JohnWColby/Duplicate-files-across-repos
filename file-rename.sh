@@ -869,6 +869,13 @@ main() {
     
     # Initialize log file
     mkdir -p "$(dirname "$LOG_FILE")"
+    
+    # Ensure LOG_FILE is absolute path at top level
+    if [[ ! "$LOG_FILE" = /* ]]; then
+        # Convert to absolute path relative to script directory
+        LOG_FILE="${SCRIPT_DIR}/${LOG_FILE}"
+    fi
+    
     log_to_file "=== Git File Rename Script Started ==="
     log_to_file "Mode: $([ "$fix_mode" = "true" ] && echo "Fix content only" || echo "Copy and rename")"
     log_to_file "Working directory: $WORK_DIR"
