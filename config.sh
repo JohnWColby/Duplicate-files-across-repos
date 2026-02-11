@@ -117,6 +117,27 @@ CONTINUE_ON_ERROR=false
 # Push changes automatically (can be overridden by command line)
 AUTO_PUSH=false
 
+#############################################################
+# Parallel Execution Configuration (for parallel_run.sh)
+#############################################################
+
+# Number of parallel processes (default: auto-detect CPU cores)
+# Set to number of CPU cores minus 1 for optimal performance
+# For network-bound operations, can be set higher (e.g., 8)
+PARALLEL_MAX_JOBS=""  # Empty = auto-detect
+
+# Repositories per batch (default: auto-calculated based on PARALLEL_MAX_JOBS)
+# Larger batches = fewer processes, less overhead
+# Smaller batches = more parallelism, better load balancing
+PARALLEL_REPOS_PER_BATCH=""  # Empty = auto-calculate
+
+# Arguments to pass to script when run in parallel
+# Examples: "-p" for push, "-d" for dry-run, "--fix-content -p" for fix mode
+PARALLEL_SCRIPT_ARGS="-p"
+
+# Work directory for parallel execution temporary files
+PARALLEL_WORK_DIR="./parallel_work"
+
 # Fix mode: if true, only updates content in existing files/directories that contain
 # the mapping VALUES (new strings), replacing any occurrences of the mapping KEYS (old strings)
 # Does NOT create new copies - only fixes content in files that match the new pattern
