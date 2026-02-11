@@ -181,7 +181,8 @@ run_parallel() {
         (
             # Set environment variables for this batch
             export REPO_LIST_FILE="$batch_file"
-            export LOG_FILE="$WORK_DIR/${batch_name}.log"
+            # Each batch writes to the main log file (thread-safe enough for our use)
+            export LOG_FILE="$(pwd)/batch_update_log.txt"
             export WORK_DIR="$WORK_DIR/repos_${batch_name}"
             
             # Run the script
@@ -234,15 +235,6 @@ run_parallel() {
     echo "Average per batch: $((duration / batch_count))s"
 }
 
-combine_logs() {
-    print_info "Combining log files..."
-    
-    if ls "$WORK_DIR"/batch_*.log >/dev/null 2>&1; then
-        cat "$WORK_DIR"/batch_*.log > "$WORK_DIR/combined.log"
-        print_success "Combined log saved to: $WORK_DIR/combined.log"
-    fi
-}
-
 show_batch_results() {
     echo ""
     print_header "Batch Results"
@@ -274,9 +266,13 @@ show_batch_results() {
     
     echo ""
     print_info "Full output files available in: $WORK_DIR/"
-    echo "  - batch_XXX_output.txt  (detailed output per batch)"
-    echo "  - batch_XXX.log         (git operations log per batch)"
-    echo "  - combined.log          (all logs combined)"
+    echo "  - batch_XXX_output.txt  (console output per batch)"
+    echo "  - batch_XXX_status.txt  (SUCCESS or FAILED)"
+    echo ""
+    print_info "Main log file: $(pwd)/batch_update_log.txt"
+    echo "  (All git operations from all batches)"
+}
+    print_info "Combined log file: $(pwd)/batch_update_log.txt"
 }
 
 #############################################################
@@ -387,7 +383,6 @@ HELP
     run_parallel "$batch_count"
     
     # Post-process
-    combine_logs
     show_batch_results
     
     echo ""
