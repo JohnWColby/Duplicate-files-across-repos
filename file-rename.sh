@@ -910,7 +910,6 @@ main() {
     local total_files_copied=0
     local successful_repos=0
     local total_repos=0
-    local repos_with_changes=()
     
     while IFS= read -r repo_input; do
         # Skip comments and empty lines
@@ -928,11 +927,15 @@ main() {
                 successful_repos=$((successful_repos + 1))
                 total_files_copied=$((total_files_copied + PROCESS_RESULT))
                 
-                # Track repos with changes for git operations
-                if [ "$PROCESS_RESULT" -gt 0 ]; then
+                # Git operations immediately after processing
+                if [ "$PROCESS_RESULT" -gt 0 ] && [ "$push_changes" = "true" ] && [ "$dry_run" = "false" ]; then
                     local repo_url=$(construct_repo_url "$repo_input")
                     local repo_name=$(get_repo_name "$repo_url")
-                    repos_with_changes+=("$repo_name")
+                    local repo_dir="$WORK_DIR/$repo_name"
+                    
+                    echo ""
+                    print_header "Git Push Operations for $repo_name"
+                    git_add_commit_push "$repo_dir" "$commit_message" "$BRANCH_NAME"
                 fi
             fi
         else
@@ -941,27 +944,19 @@ main() {
                 successful_repos=$((successful_repos + 1))
                 total_files_copied=$((total_files_copied + PROCESS_RESULT))
                 
-                # Track repos with changes for git operations
-                if [ "$PROCESS_RESULT" -gt 0 ]; then
+                # Git operations immediately after processing
+                if [ "$PROCESS_RESULT" -gt 0 ] && [ "$push_changes" = "true" ] && [ "$dry_run" = "false" ]; then
                     local repo_url=$(construct_repo_url "$repo_input")
                     local repo_name=$(get_repo_name "$repo_url")
-                    repos_with_changes+=("$repo_name")
+                    local repo_dir="$WORK_DIR/$repo_name"
+                    
+                    echo ""
+                    print_header "Git Push Operations for $repo_name"
+                    git_add_commit_push "$repo_dir" "$commit_message" "$BRANCH_NAME"
                 fi
             fi
         fi
     done < "$REPO_LIST_FILE"
-    
-    # Git operations if requested
-    if [ "$push_changes" = "true" ] && [ "$dry_run" = "false" ] && [ ${#repos_with_changes[@]} -gt 0 ]; then
-        echo ""
-        print_header "Git Push Operations"
-        
-        for repo_name in "${repos_with_changes[@]}"; do
-            local repo_dir="$WORK_DIR/$repo_name"
-            echo ""
-            git_add_commit_push "$repo_dir" "$commit_message" "$BRANCH_NAME"
-        done
-    fi
     
     # Summary
     echo ""
