@@ -2,6 +2,134 @@
 
 A pure bash script that clones git repositories and creates renamed copies of files based on string substitution patterns. Features robust authentication support, branching, logging, and flexible configuration.
 
+## Quickstart (5 Minutes)
+
+### Prerequisites
+- Bash 4.0+ (for bash version) OR Python 3.6+ (for Python version)
+- Git 2.0+
+- SSH keys configured (for SSH auth) OR GitHub Personal Access Token (for token auth)
+
+### Setup
+
+**1. Get your authentication ready:**
+
+For **Token authentication** (recommended):
+```bash
+# Get token from: GitHub Settings → Developer settings → Personal access tokens
+# Generate new token with 'repo' permissions
+export GIT_AUTH_TOKEN="ghp_your_token_here"
+```
+
+For **SSH authentication**:
+```bash
+# Ensure your SSH key is added and loaded
+ssh-add ~/.ssh/id_rsa
+ssh -T git@github.com  # Test connection
+```
+
+**2. Configure the script:**
+
+Edit `config.sh`:
+```bash
+# Authentication
+GIT_AUTH_METHOD="token"  # or "ssh" or "none"
+GIT_USERNAME="your-github-username"
+GIT_AUTH_TOKEN="${GIT_AUTH_TOKEN:-}"  # Uses environment variable
+
+# Repository base URL
+GIT_BASE_URL="https://github.com/your-org"
+
+# Branches
+BASE_BRANCH="main"           # Branch to start from
+BRANCH_NAME="add-prod-files" # Branch to create for changes
+
+# What to copy/rename
+declare -a REPLACEMENTS=(
+    "dev|prod"     # config.dev.yaml → config.prod.yaml
+    "test|final"   # api.test.js → api.final.js
+)
+```
+
+**3. Add your repositories:**
+
+Edit `repos.txt`:
+```txt
+repo1
+repo2
+backend-service
+```
+
+Or use full URLs:
+```txt
+https://github.com/user/repo1.git
+git@github.com:user/repo2.git
+```
+
+**4. Run the script:**
+
+**Bash version:**
+```bash
+# Test first (dry run)
+./git_file_rename.sh -d
+
+# Copy and push
+./git_file_rename.sh -p
+```
+
+**Python version:**
+```bash
+# Test first (dry run)
+python3 git_file_rename.py -d
+
+# Copy and push
+python3 git_file_rename.py -p
+```
+
+### What It Does
+
+For each repository:
+1. Clones the repo (or uses existing)
+2. Checks out `BASE_BRANCH` (pulls latest if no local commits)
+3. Creates `BRANCH_NAME` branch
+4. Finds all files/directories containing "dev" or "test" in their names
+5. Creates copies renamed to "prod" or "final"
+6. Replaces "dev"→"prod" and "test"→"final" **inside** the copied files
+7. Commits and pushes to the new branch
+
+### Common Issues
+
+**"Authentication failed"**
+```bash
+# For token auth, verify token is set:
+echo $GIT_AUTH_TOKEN
+
+# For SSH, verify key is loaded:
+ssh-add -l
+```
+
+**"Command not found"**
+```bash
+# Make scripts executable:
+chmod +x git_file_rename.sh git_file_rename.py
+```
+
+**"No files found"**
+- Check pattern matching in `REPLACEMENTS` array
+- Verify files exist with those patterns in their names
+- Check `CASE_SENSITIVE` setting (default: true)
+
+### Quick Reference
+
+| Task | Bash | Python |
+|------|------|--------|
+| Dry run | `./git_file_rename.sh -d` | `python3 git_file_rename.py -d` |
+| Copy only | `./git_file_rename.sh` | `python3 git_file_rename.py` |
+| Copy & push | `./git_file_rename.sh -p` | `python3 git_file_rename.py -p` |
+| Fix existing | `./git_file_rename.sh -f -p` | `python3 git_file_rename.py -f -p` |
+| Custom message | `./git_file_rename.sh -p -m "msg"` | `python3 git_file_rename.py -p -m "msg"` |
+
+---
+
 ## Quick Start (2 Minutes)
 
 ### 1. Configure Authentication (config.sh)
@@ -1048,16 +1176,27 @@ The Python version parses config.sh directly, so you only need to maintain one c
 
 ## Changelog
 
+### Version 2.1.0 (Current)
+- **Git Resiliency**: Added retry logic (3 attempts) for clone and push operations
+- **Immediate Git Operations**: Commits and pushes happen immediately after each repo (not batched at end)
+- **Better Error Reporting**: Shows actual git errors when operations fail
+- **Python Repo Name Fix**: Uses repo name directly from repos.txt (doesn't reconstruct from URL)
+- **Improved Logging**: Added detailed retry information and failure reasons
+
 ### Version 2.0.0
 - Added token-based HTTPS authentication
 - Added SSH authentication support
-- Added branch creation and management
+- Added branch creation and management  
 - Added comprehensive logging with LOG_FILE
 - Added case-sensitive/insensitive matching
 - Added support for repo names (combined with GIT_BASE_URL)
 - Enhanced error handling
 - Multi-line commit message support
 - Standardized on REPLACEMENTS array name
+- **FIX_MODE**: Added fix mode to update existing files without copying
+- **Content Replacement**: Automatically replaces strings inside copied files
+- **Directory Support**: Recursively copies entire directories with content replacement
+- **Auto Fetch/Pull**: Pulls latest changes when no local commits ahead
 
 ### Version 1.0.0
 - Initial bash version
