@@ -10,26 +10,35 @@
 set -e
 
 #############################################################
-# Configuration
+# Load Configuration
+#############################################################
+
+# Try to load config.sh if it exists
+if [ -f "config.sh" ]; then
+    source config.sh
+fi
+
+#############################################################
+# Configuration (can be overridden by config.sh or command line)
 #############################################################
 
 # Number of parallel processes (default: number of CPU cores)
-MAX_PARALLEL=${MAX_PARALLEL:-$(nproc 2>/dev/null || echo 4)}
+MAX_PARALLEL=${PARALLEL_MAX_JOBS:-${MAX_PARALLEL:-$(nproc 2>/dev/null || echo 4)}}
 
 # Script to run
 SCRIPT="./git_file_rename.sh"
 
 # Repository list file
-REPO_LIST_FILE="repos.txt"
+REPO_LIST_FILE=${REPO_LIST_FILE:-"repos.txt"}
 
 # Work directory for temporary files
-WORK_DIR="./parallel_work"
+WORK_DIR=${PARALLEL_WORK_DIR:-"./parallel_work"}
 
 # Script arguments (e.g., "-p" for push, "-d" for dry-run)
-SCRIPT_ARGS="${SCRIPT_ARGS:--p}"
+SCRIPT_ARGS=${PARALLEL_SCRIPT_ARGS:-${SCRIPT_ARGS:-"-p"}}
 
 # Repositories per batch (auto-calculated if not set)
-REPOS_PER_BATCH=""
+REPOS_PER_BATCH=${PARALLEL_REPOS_PER_BATCH:-${REPOS_PER_BATCH:-""}}
 
 #############################################################
 # Color Codes
