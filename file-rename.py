@@ -12,6 +12,7 @@ import subprocess
 import argparse
 import shutil
 import re
+import time
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
 
@@ -135,28 +136,45 @@ class GitFileRename:
         else:
             return f"{self.git_base_url}/{repo_name}.git"
     
-    def get_repo_name(self, url: str) -> str:
-        """Extract repository name from URL"""
-        name = url.rstrip('/').split('/')[-1]
-        if name.endswith('.git'):
-            name = name[:-4]
-        return name
+    def get_repo_name(self, repo_input: str) -> str:
+        """Extract repository name directly from input"""
+        # If it's a URL, extract the name
+        if repo_input.startswith('http://') or repo_input.startswith('https://') or repo_input.startswith('git@'):
+            name = repo_input.rstrip('/').split('/')[-1]
+            if name.endswith('.git'):
+                name = name[:-4]
+            return name
+        # Otherwise use the input directly as the name
+        return repo_input.rstrip('.git')
     
-    def clone_repository(self, url: str, target_dir: Path) -> bool:
+    def clone_repository(self, url: str, target_dir: Path, repo_name: str) -> bool:
         """Clone a git repository if it doesn't exist"""
+        max_retries = 3
+        
         if target_dir.exists():
+            self.log_to_file(f"Repository: {repo_name} | Status: EXISTS | Details: Using existing clone")
             return True
         
-        self.print_info(f"Cloning repository: {target_dir.name}")
-        try:
-            self.run_command(['git', 'clone', url, str(target_dir)], capture_output=True)
-            self.print_success(f"Successfully cloned to: {target_dir}")
-            self.log_to_file(f"Repository: {target_dir.name} | Status: CLONED | Details: New clone")
-            return True
-        except subprocess.CalledProcessError:
-            self.print_error(f"Failed to clone repository: {url}")
-            self.log_to_file(f"Repository: {target_dir.name} | Status: FAILED | Details: Clone failed")
-            return False
+        self.print_info(f"Cloning repository: {repo_name}")
+        
+        for retry in range(max_retries):
+            try:
+                self.run_command(['git', 'clone', url, str(target_dir)], capture_output=True)
+                self.print_success(f"Successfully cloned to: {target_dir}")
+                self.log_to_file(f"Repository: {repo_name} | Status: CLONED | Details: New clone")
+                return True
+            except subprocess.CalledProcessError as e:
+                if retry < max_retries - 1:
+                    self.print_warning(f"Clone failed (attempt {retry + 1}/{max_retries}), retrying in 5 seconds...")
+                    time.sleep(5)
+                else:
+                    self.print_error(f"Failed to clone repository after {max_retries} attempts: {url}")
+                    if e.stderr:
+                        print(e.stderr)
+                    self.log_to_file(f"Repository: {repo_name} | Status: FAILED | Details: Clone failed after {max_retries} attempts")
+                    return False
+        
+        return False
     
     def checkout_base_branch(self, repo_dir: Path, base_branch: str) -> bool:
         """Checkout base branch and pull if no local commits ahead"""
@@ -363,16 +381,16 @@ class GitFileRename:
         
         return True
     
-    def process_repository(self, repo_input: str, dry_run: bool) -> int:
+    def process_repository(self, repo_input: str, dry_run: bool, push: bool) -> int:
         """Process a repository in normal mode"""
         repo_url = self.construct_repo_url(repo_input)
-        repo_name = self.get_repo_name(repo_url)
+        repo_name = self.get_repo_name(repo_input)  # Use input directly
         repo_dir = self.work_dir / repo_name
         
         self.print_header(f"Processing repository: {repo_name}")
         
         # Clone
-        if not self.clone_repository(repo_url, repo_dir):
+        if not self.clone_repository(repo_url, repo_dir, repo_name):
             return 0
         
         # Checkout base branch
@@ -411,18 +429,25 @@ class GitFileRename:
         
         print()
         print(f"Items copied in {repo_name}: {items_copied}")
+        
+        # Git operations immediately after processing
+        if push and not dry_run and items_copied > 0:
+            print()
+            self.print_header(f"Git Push Operations for {repo_name}")
+            self.git_add_commit_push(repo_dir, self.commit_message, repo_name)
+        
         return items_copied
     
-    def process_repository_fix_mode(self, repo_input: str, dry_run: bool) -> int:
+    def process_repository_fix_mode(self, repo_input: str, dry_run: bool, push: bool) -> int:
         """Process a repository in fix mode"""
         repo_url = self.construct_repo_url(repo_input)
-        repo_name = self.get_repo_name(repo_url)
+        repo_name = self.get_repo_name(repo_input)  # Use input directly
         repo_dir = self.work_dir / repo_name
         
         self.print_header(f"Processing repository (FIX MODE): {repo_name}")
         
         # Clone
-        if not self.clone_repository(repo_url, repo_dir):
+        if not self.clone_repository(repo_url, repo_dir, repo_name):
             return 0
         
         # Checkout base branch
@@ -486,10 +511,19 @@ class GitFileRename:
         
         print()
         print(f"Items fixed in {repo_name}: {items_fixed}")
+        
+        # Git operations immediately after processing
+        if push and not dry_run and items_fixed > 0:
+            print()
+            self.print_header(f"Git Push Operations for {repo_name}")
+            self.git_add_commit_push(repo_dir, self.commit_message, repo_name)
+        
         return items_fixed
     
-    def git_add_commit_push(self, repo_dir: Path, commit_message: str) -> bool:
+    def git_add_commit_push(self, repo_dir: Path, commit_message: str, repo_name: str) -> bool:
         """Add, commit, and push changes"""
+        max_retries = 3
+        
         try:
             # Check if there are changes
             result = self.run_command(['git', 'status', '--porcelain'], cwd=repo_dir)
@@ -497,7 +531,7 @@ class GitFileRename:
                 self.print_info("No changes to commit")
                 return True
             
-            self.print_info(f"Git operations in: {repo_dir.name}")
+            self.print_info(f"Git operations in: {repo_name}")
             
             # Add changes
             print("  Adding changes...")
@@ -511,15 +545,30 @@ class GitFileRename:
             result = self.run_command(['git', 'branch', '--show-current'], cwd=repo_dir)
             branch = result.stdout.strip()
             
-            # Push
+            # Push with retry
             print(f"  Pushing to branch: {branch}")
-            self.run_command(['git', 'push', 'origin', branch], cwd=repo_dir, capture_output=True)
+            for retry in range(max_retries):
+                try:
+                    self.run_command(['git', 'push', 'origin', branch], cwd=repo_dir, capture_output=True)
+                    self.print_success("Successfully pushed changes")
+                    self.log_to_file(f"Repository: {repo_name} | Status: PUSHED | Details: Branch: {branch}")
+                    return True
+                except subprocess.CalledProcessError as e:
+                    if retry < max_retries - 1:
+                        self.print_warning(f"Push failed (attempt {retry + 1}/{max_retries}), retrying in 5 seconds...")
+                        time.sleep(5)
+                    else:
+                        self.print_error(f"Failed to push changes after {max_retries} attempts")
+                        if e.stderr:
+                            print(e.stderr)
+                        self.log_to_file(f"Repository: {repo_name} | Status: PUSH_FAILED | Details: Branch: {branch}")
+                        return False
             
-            self.print_success("Successfully pushed changes")
-            self.log_to_file(f"Repository: {repo_dir.name} | Status: PUSHED | Details: Branch: {branch}")
-            return True
-        except subprocess.CalledProcessError:
+            return False
+        except subprocess.CalledProcessError as e:
             self.print_error("Git operation failed")
+            if e.stderr:
+                print(e.stderr)
             return False
     
     def run(self, dry_run: bool = False, push: bool = False, commit_message: Optional[str] = None, fix_mode: Optional[bool] = None):
@@ -575,7 +624,6 @@ class GitFileRename:
         total_items = 0
         successful_repos = 0
         total_repos = 0
-        repos_with_changes = []
         
         with open(self.repo_list_file, 'r') as f:
             for line in f:
@@ -589,28 +637,13 @@ class GitFileRename:
                 print()
                 
                 if self.fix_mode:
-                    items = self.process_repository_fix_mode(line, dry_run)
+                    items = self.process_repository_fix_mode(line, dry_run, push)
                 else:
-                    items = self.process_repository(line, dry_run)
+                    items = self.process_repository(line, dry_run, push)
                 
                 if items >= 0:
                     successful_repos += 1
                     total_items += items
-                    
-                    if items > 0:
-                        repo_url = self.construct_repo_url(line)
-                        repo_name = self.get_repo_name(repo_url)
-                        repos_with_changes.append(repo_name)
-        
-        # Git operations
-        if push and not dry_run and repos_with_changes:
-            print()
-            self.print_header("Git Push Operations")
-            
-            for repo_name in repos_with_changes:
-                repo_dir = self.work_dir / repo_name
-                print()
-                self.git_add_commit_push(repo_dir, self.commit_message)
         
         # Summary
         print()
