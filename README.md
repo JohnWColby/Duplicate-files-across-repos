@@ -1049,8 +1049,22 @@ rm *.prod.*  # Delete existing files first
 
 ## Log File
 
-The log file (`LOG_FILE`) tracks all operations:
+The log file (`LOG_FILE`) tracks all operations in a single file at the top level:
 
+**Location:** Always in the directory where you run the script (not in subdirectories)
+
+```
+# If you run from /home/user/project/
+./git_file_rename.sh -p
+
+# Log file will be at:
+/home/user/project/batch_update_log.txt
+
+# NOT at:
+/home/user/project/repos_temp/batch_update_log.txt  ❌
+```
+
+**Format:**
 ```
 [2024-02-07 10:30:15] === Git File Rename Script Started ===
 [2024-02-07 10:30:15] Working directory: ./repos_temp
@@ -1058,14 +1072,25 @@ The log file (`LOG_FILE`) tracks all operations:
 [2024-02-07 10:30:16] Repository: api-service | Status: CLONED | Details: New clone
 [2024-02-07 10:30:18] Repository: api-service | Status: PUSHED | Details: Branch: update-strings
 [2024-02-07 10:30:20] === Script Completed ===
-[2024-02-07 10:30:20] Total files copied: 3
+[2024-02-07 10:30:20] Total items: 3
 [2024-02-07 10:30:20] Successful repos: 1/1
 ```
 
+**Parallel Execution:** All batches write to the same log file with timestamps, making it easy to track all operations in one place.
+
 View log:
 ```bash
-cat ./batch_update_log.txt
-tail -f ./batch_update_log.txt  # Live monitoring
+# View entire log
+cat batch_update_log.txt
+
+# Live monitoring
+tail -f batch_update_log.txt
+
+# Search for errors
+grep -i error batch_update_log.txt
+
+# View specific repository
+grep "Repository: my-repo" batch_update_log.txt
 ```
 
 ## Advanced Usage
@@ -1366,9 +1391,10 @@ Batch Results
 ✓ batch_003: 25 repos - SUCCESS
 
 ℹ Full output files available in: ./parallel_work/
-  - batch_XXX_output.txt  (detailed output per batch)
-  - batch_XXX.log         (git operations log per batch)
-  - combined.log          (all logs combined)
+  - batch_XXX_output.txt  (detailed console output per batch)
+  - batch_XXX_status.txt  (SUCCESS or FAILED)
+
+Main log file: ./batch_update_log.txt (all git operations from all batches)
 
 ✓ Parallel execution completed!
 ```
@@ -1376,23 +1402,26 @@ Batch Results
 ### Work Directory Structure
 
 ```
+# Top level (where script is run)
+batch_update_log.txt           # Single log file for ALL operations
+
+# Parallel work directory
 parallel_work/
-├── repos_clean.txt          # Cleaned repository list
-├── batch_000                # First batch of repos
-├── batch_000_output.txt     # Detailed output for batch 0
-├── batch_000.log           # Git operations log for batch 0
-├── batch_000_status.txt    # SUCCESS or FAILED
-├── batch_001                # Second batch
+├── repos_clean.txt            # Cleaned repository list
+├── batch_000                  # First batch of repos
+├── batch_000_output.txt       # Console output for batch 0
+├── batch_000_status.txt       # SUCCESS or FAILED
+├── batch_001                  # Second batch
 ├── batch_001_output.txt
-├── batch_001.log
 ├── batch_001_status.txt
 ├── ...
-├── combined.log            # All logs combined
-└── repos_batch_000/        # Cloned repos for batch 0
+└── repos_batch_000/          # Cloned repos for batch 0
     ├── repo1/
     ├── repo2/
     └── ...
 ```
+
+**Note:** All batches write to the same `batch_update_log.txt` at the top level with timestamps.
 
 ## Performance Tuning
 
@@ -1546,7 +1575,7 @@ export GIT_AUTH_TOKEN="your_token"
 
 5. **Review logs before retry:**
    ```bash
-   cat parallel_work/combined.log | grep -i error
+   cat batch_update_log.txt | grep -i error
    ```
 
 6. **Keep batches reasonable:**
