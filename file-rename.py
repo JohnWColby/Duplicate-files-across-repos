@@ -35,7 +35,15 @@ class GitFileRename:
         self.case_sensitive = config_vars.get('CASE_SENSITIVE', 'true').lower() == 'true'
         self.work_dir = Path(config_vars.get('WORK_DIR', './repos_temp'))
         self.commit_message = config_vars.get('COMMIT_MESSAGE', 'Update string replacements across repository')
-        self.log_file = Path(config_vars.get('LOG_FILE', './batch_update_log.txt'))
+        
+        # Ensure log file is always at top level (current directory where script is run)
+        log_file_path = config_vars.get('LOG_FILE', './batch_update_log.txt')
+        if not Path(log_file_path).is_absolute():
+            # Make it absolute relative to current directory
+            self.log_file = Path.cwd() / log_file_path
+        else:
+            self.log_file = Path(log_file_path)
+        
         self.fix_mode = config_vars.get('FIX_MODE', 'false').lower() == 'true'
         
         # Parse replacements
